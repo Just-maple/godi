@@ -19,7 +19,7 @@ func TestProvide(t *testing.T) {
 	p := Provide(db)
 
 	var got Database
-	if err := p.Inject(&got); err != nil {
+	if err := p.Inject(nil, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.DSN != db.DSN {
@@ -312,49 +312,49 @@ func TestLazyDependencyOrderIndependent_Shuffle(t *testing.T) {
 				for _, idx := range order {
 					switch idx {
 					case 0:
-						c.MustAdd(Lazy(func() (L0, error) { return 1, nil }))
+						c.MustAdd(Lazy(func(c *Container) (L0, error) { return 1, nil }))
 					case 1:
-						c.MustAdd(Lazy(func() (L1, error) {
+						c.MustAdd(Lazy(func(c *Container) (L1, error) {
 							v, _ := Inject[L0](c)
 							return L1(v) + 1, nil
 						}))
 					case 2:
-						c.MustAdd(Lazy(func() (L2, error) {
+						c.MustAdd(Lazy(func(c *Container) (L2, error) {
 							v, _ := Inject[L1](c)
 							return L2(v) + 1, nil
 						}))
 					case 3:
-						c.MustAdd(Lazy(func() (L3, error) {
+						c.MustAdd(Lazy(func(c *Container) (L3, error) {
 							v, _ := Inject[L2](c)
 							return L3(v) + 1, nil
 						}))
 					case 4:
-						c.MustAdd(Lazy(func() (L4, error) {
+						c.MustAdd(Lazy(func(c *Container) (L4, error) {
 							v, _ := Inject[L3](c)
 							return L4(v) + 1, nil
 						}))
 					case 5:
-						c.MustAdd(Lazy(func() (L5, error) {
+						c.MustAdd(Lazy(func(c *Container) (L5, error) {
 							v, _ := Inject[L4](c)
 							return L5(v) + 1, nil
 						}))
 					case 6:
-						c.MustAdd(Lazy(func() (L6, error) {
+						c.MustAdd(Lazy(func(c *Container) (L6, error) {
 							v, _ := Inject[L5](c)
 							return L6(v) + 1, nil
 						}))
 					case 7:
-						c.MustAdd(Lazy(func() (L7, error) {
+						c.MustAdd(Lazy(func(c *Container) (L7, error) {
 							v, _ := Inject[L6](c)
 							return L7(v) + 1, nil
 						}))
 					case 8:
-						c.MustAdd(Lazy(func() (L8, error) {
+						c.MustAdd(Lazy(func(c *Container) (L8, error) {
 							v, _ := Inject[L7](c)
 							return L8(v) + 1, nil
 						}))
 					case 9:
-						c.MustAdd(Lazy(func() (L9, error) {
+						c.MustAdd(Lazy(func(c *Container) (L9, error) {
 							v, _ := Inject[L8](c)
 							return L9(v) + 1, nil
 						}))
@@ -379,21 +379,21 @@ func TestLazyLargeDependencyGraph(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			for run := 0; run < 10; run++ {
 				c := &Container{}
-				c.MustAdd(Lazy(func() (L0, error) { return 100, nil }))
-				c.MustAdd(Lazy(func() (L1, error) {
+				c.MustAdd(Lazy(func(c *Container) (L0, error) { return 100, nil }))
+				c.MustAdd(Lazy(func(c *Container) (L1, error) {
 					v, _ := Inject[L0](c)
 					return L1(v) + 10, nil
 				}))
-				c.MustAdd(Lazy(func() (L2, error) {
+				c.MustAdd(Lazy(func(c *Container) (L2, error) {
 					v, _ := Inject[L0](c)
 					return L2(v) + 20, nil
 				}))
-				c.MustAdd(Lazy(func() (L3, error) {
+				c.MustAdd(Lazy(func(c *Container) (L3, error) {
 					v1, _ := Inject[L1](c)
 					v2, _ := Inject[L2](c)
 					return L3(int(v1) + int(v2) + 30), nil
 				}))
-				c.MustAdd(Lazy(func() (L4, error) {
+				c.MustAdd(Lazy(func(c *Container) (L4, error) {
 					v, _ := Inject[L3](c)
 					return L4(v) + 40, nil
 				}))
@@ -407,11 +407,11 @@ func TestLazyLargeDependencyGraph(t *testing.T) {
 
 func TestCircularDependency(t *testing.T) {
 	c := &Container{}
-	c.MustAdd(Lazy(func() (int, error) {
+	c.MustAdd(Lazy(func(c *Container) (int, error) {
 		_, err := Inject[string](c)
 		return 0, err
 	}))
-	c.MustAdd(Lazy(func() (string, error) {
+	c.MustAdd(Lazy(func(c *Container) (string, error) {
 		_, err := Inject[int](c)
 		return "", err
 	}))
@@ -475,10 +475,10 @@ func TestMultiContainer_NotFound(t *testing.T) {
 func TestLazyWithError(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(
-		Lazy(func() (int, error) {
+		Lazy(func(c *Container) (int, error) {
 			return 0, fmt.Errorf("intentional error")
 		}),
-		Lazy(func() (string, error) {
+		Lazy(func(c *Container) (string, error) {
 			_, err := Inject[int](c)
 			if err != nil {
 				return "", fmt.Errorf("wrapped: %w", err)
@@ -498,7 +498,7 @@ func TestTypeAliases(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(
 		Provide(StringAlias("alias-value")),
-		Lazy(func() (IntAlias, error) {
+		Lazy(func(c *Container) (IntAlias, error) {
 			s, _ := Inject[StringAlias](c)
 			return IntAlias(len(s)), nil
 		}),
@@ -515,7 +515,7 @@ func TestComplexScenarios(t *testing.T) {
 		c := &Container{}
 		c.MustAdd(
 			Provide("static"),
-			Lazy(func() (int, error) {
+			Lazy(func(c *Container) (int, error) {
 				s, _ := Inject[string](c)
 				if s != "static" {
 					return 0, fmt.Errorf("unexpected: %s", s)
@@ -532,11 +532,11 @@ func TestComplexScenarios(t *testing.T) {
 	t.Run("CrossDependencies", func(t *testing.T) {
 		c := &Container{}
 		c.MustAdd(
-			Lazy(func() (string, error) {
+			Lazy(func(c *Container) (string, error) {
 				i, _ := Inject[int](c)
 				return fmt.Sprintf("got-%d", i), nil
 			}),
-			Lazy(func() (int, error) { return 42, nil }),
+			Lazy(func(c *Container) (int, error) { return 42, nil }),
 		)
 		v, err := Inject[string](c)
 		if err != nil || v != "got-42" {
@@ -549,12 +549,12 @@ func TestComplexScenarios(t *testing.T) {
 		type L2 int
 		c := &Container{}
 		c.MustAdd(
-			Lazy(func() (int, error) { return 1, nil }),
-			Lazy(func() (L1, error) {
+			Lazy(func(c *Container) (int, error) { return 1, nil }),
+			Lazy(func(c *Container) (L1, error) {
 				v, _ := Inject[int](c)
 				return L1(v + 1), nil
 			}),
-			Lazy(func() (L2, error) {
+			Lazy(func(c *Container) (L2, error) {
 				v, _ := Inject[L1](c)
 				return L2(v * 10), nil
 			}),
@@ -562,6 +562,43 @@ func TestComplexScenarios(t *testing.T) {
 		v, err := Inject[L2](c)
 		if err != nil || v != 20 {
 			t.Errorf("expected 20, got %v", v)
+		}
+	})
+
+	t.Run("ChainMultiContainer", func(t *testing.T) {
+		type Name string
+		type Age int
+
+		c1, c2 := &Container{}, &Container{}
+		c1.MustAdd(Provide(Name("Alice")))
+		c2.MustAdd(
+			Provide(Name("Bob")),
+			Chain(func(n Name) (Age, error) {
+				return Age(len(n)), nil
+			}),
+		)
+
+		age, err := Inject[Age](c2)
+		if err != nil || age != 3 {
+			t.Errorf("expected 3, got %v", age)
+		}
+	})
+
+	t.Run("ChainErrorPropagation", func(t *testing.T) {
+		type Input string
+		type Output string
+
+		c := &Container{}
+		c.MustAdd(
+			Provide(Input("test")),
+			Chain(func(s Input) (Output, error) {
+				return Output(s + "-ok"), nil
+			}),
+		)
+
+		out, err := Inject[Output](c)
+		if err != nil || out != "test-ok" {
+			t.Errorf("expected test-ok, got %v", out)
 		}
 	})
 }

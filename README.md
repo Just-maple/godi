@@ -65,8 +65,10 @@ c.MustAdd(
 **Lazy** - Register a factory that executes on first request:
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
-    return sql.Open("mysql", dsn)
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
+    // Container is available for injecting dependencies
+    cfg, _ := godi.Inject[Config](c)
+    return sql.Open("mysql", cfg.DSN)
 }))
 ```
 
@@ -121,7 +123,7 @@ func main() {
 Defer expensive initialization until first use. Errors from the factory are returned to the caller:
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     // This code runs only when Database is first requested
     return sql.Open("mysql", dsn)
 }))
@@ -140,7 +142,7 @@ Lazy factories can inject their own dependencies:
 ```go
 c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     // Inject dependency inside factory
     cfg, err := godi.Inject[Config](c)
     if err != nil {
@@ -159,19 +161,19 @@ Build chains of dependencies:
 c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 // Level 2: Database depends on Config
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     cfg, _ := godi.Inject[Config](c)
     return NewDatabase(cfg.DSN)
 }))
 
 // Level 3: Repository depends on Database
-c.Add(godi.Lazy(func() (*UserRepository, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserRepository, error) {
     db, _ := godi.Inject[*Database](c)
     return NewUserRepository(db)
 }))
 
 // Level 4: Service depends on Repository
-c.Add(godi.Lazy(func() (*UserService, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserService, error) {
     repo, _ := godi.Inject[*UserRepository](c)
     return NewUserService(repo)
 }))
@@ -188,12 +190,12 @@ Circular dependencies are detected at runtime:
 type A struct{ B *B }
 type B struct{ A *A }
 
-c.Add(godi.Lazy(func() (A, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (A, error) {
     b, err := godi.Inject[B](c)
     return A{B: b}, err
 }))
 
-c.Add(godi.Lazy(func() (B, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (B, error) {
     a, err := godi.Inject[A](c)
     return B{A: a}, err
 }))
@@ -239,7 +241,7 @@ type Database interface {
 }
 
 // Register implementation
-c.Add(godi.Lazy(func() (Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     return NewMySQLDatabase(dsn)
 }))
 
@@ -254,7 +256,7 @@ Swap implementations for testing:
 ```go
 // Production
 prod := &godi.Container{}
-prod.Add(godi.Lazy(func() (Database, error) {
+prod.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     return NewMySQLDatabase(prodDSN)
 }))
 
@@ -296,7 +298,7 @@ lifecycle := lifecycle.New("MyApp")
 c.Add(godi.Provide(lifecycle))
 
 // Register database with cleanup hook
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     db := NewDatabase(dsn)
     
     // Register cleanup hook
@@ -308,7 +310,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 }))
 
 // Register service with shutdown hook
-c.Add(godi.Lazy(func() (*Service, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Service, error) {
     svc := NewService()
     
     // Register graceful shutdown hook
@@ -326,6 +328,45 @@ lifecycle.Shutdown(shutdownCtx)
 ```
 
 Hooks execute in reverse order (LIFO - Last In, First Out), ensuring proper cleanup order.
+
+### 12. Chain - Transform Dependencies
+
+Transform one dependency into another using Chain:
+
+```go
+// Simple chain: string -> int -> string
+type Name string
+type Length int
+type Result string
+
+c.Add(
+    godi.Provide(Name("hello")),
+    godi.Chain(func(s Name) (Length, error) {
+        return Length(len(s)), nil
+    }),
+    godi.Chain(func(n Length) (Result, error) {
+        return Result(fmt.Sprintf("len%d", n)), nil
+    }),
+)
+
+result, _ := godi.Inject[Result](c)
+// result == "len5"
+
+// Real-world: Config -> Database -> Repository
+c.Add(
+    godi.Provide(Config{DSN: "mysql://localhost"}),
+    godi.Chain(func(cfg Config) (*Database, error) {
+        return &Database{ConnString: cfg.DSN}, nil
+    }),
+    godi.Chain(func(db *Database) (*Repository, error) {
+        return &Repository{DB: db}, nil
+    }),
+)
+
+repo, _ := godi.Inject[*Repository](c)
+```
+
+Chain automatically receives the Container for injecting dependencies - no need to pass it explicitly!
 
 ---
 
@@ -361,7 +402,7 @@ Hooks execute in reverse order (LIFO - Last In, First Out), ensuring proper clea
 ### Pattern 1: Simple Lazy
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     return sql.Open("mysql", dsn)
 }))
 ```
@@ -369,7 +410,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 ### Pattern 2: Lazy with Error Handling
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     db, err := sql.Open("mysql", dsn)
     if err != nil {
         return nil, err
@@ -384,7 +425,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 ### Pattern 3: Lazy with Dependencies
 
 ```go
-c.Add(godi.Lazy(func() (*UserService, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserService, error) {
     db, err := godi.Inject[*Database](c)
     if err != nil {
         return nil, err
@@ -402,7 +443,7 @@ c.Add(godi.Lazy(func() (*UserService, error) {
 Lazy providers are singletons - factory executes once:
 
 ```go
-c.Add(godi.Lazy(func() (*ExpensiveResource, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*ExpensiveResource, error) {
     fmt.Println("Initializing...") // Prints only once
     return NewExpensiveResource()
 }))
@@ -417,7 +458,7 @@ r2, _ := godi.Inject[*ExpensiveResource](c)
 ### Pattern 5: Conditional Lazy
 
 ```go
-c.Add(godi.Lazy(func() (Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     cfg, _ := godi.Inject[Config](c)
     
     if cfg.Environment == "test" {
@@ -481,6 +522,7 @@ See [examples/](examples/) for complete examples:
 | 08-testing-mock | Mock testing |
 | 09-web-app | Production web app |
 | 10-lifecycle-cleanup | Lifecycle management and cleanup |
+| 11-chain | Dependency transformation with Chain |
 
 ## License
 

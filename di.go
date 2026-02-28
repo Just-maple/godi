@@ -9,17 +9,17 @@ import (
 var errTypeMismatch = errors.New("type mismatch")
 
 type Provider interface {
-	Inject(any) error
+	Inject(*Container, any) error
 	ID() any
 }
 
-type prov[T any] func(any) error
+type prov[T any] func(*Container, any) error
 
-func (p prov[T]) Inject(ptr any) error { return p(ptr) }
-func (p prov[T]) ID() any              { return (*T)(nil) }
+func (p prov[T]) Inject(c *Container, ptr any) error { return p(c, ptr) }
+func (p prov[T]) ID() any                            { return (*T)(nil) }
 
 func Provide[T any](v T) Provider {
-	return prov[T](func(dst any) error {
+	return prov[T](func(_ *Container, dst any) error {
 		if p, ok := dst.(*T); ok {
 			*p = v
 			return nil
@@ -68,10 +68,7 @@ func InjectTo[T any](v *T, cs ...*Container) error {
 		ps := c.providers
 		c.mu.Unlock()
 		for _, p := range ps {
-			if err := p.Inject(v); err == nil {
-				c.injecting.Delete(id)
-				return nil
-			} else if !errors.Is(err, errTypeMismatch) {
+			if err := p.Inject(c, v); err == nil || !errors.Is(err, errTypeMismatch) {
 				c.injecting.Delete(id)
 				return err
 			}
@@ -87,8 +84,7 @@ func MustInjectTo[T any](v *T, c ...*Container) {
 	}
 }
 
-func Inject[T any](c ...*Container) (T, error) {
-	var v T
+func Inject[T any](c ...*Container) (v T, _ error) {
 	return v, InjectTo(&v, c...)
 }
 
@@ -100,29 +96,30 @@ func MustInject[T any](c ...*Container) T {
 	return v
 }
 
-func Lazy[T any](f func() (T, error)) Provider {
-	l := &lazy[T]{f: f}
-	return l
-}
-
-type lazy[T any] struct {
-	f     func() (T, error)
-	once  sync.Once
-	value T
-	err   error
-}
-
-func (l *lazy[T]) Inject(ptr any) error {
-	p, ok := ptr.(*T)
-	if !ok {
+func Lazy[T any](f func(*Container) (T, error)) Provider {
+	l := new(struct {
+		once  sync.Once
+		value T
+		err   error
+	})
+	return prov[T](func(c *Container, ptr any) error {
+		if p, ok := ptr.(*T); ok {
+			if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
+				return fmt.Errorf("create %T error: %w", l.value, l.err)
+			}
+			*p = l.value
+			return nil
+		}
 		return errTypeMismatch
-	}
-	l.once.Do(func() { l.value, l.err = l.f() })
-	if l.err != nil {
-		return fmt.Errorf("create %T error: %w", l.value, l.err)
-	}
-	*p = l.value
-	return nil
+	})
 }
 
-func (l *lazy[T]) ID() any { return (*T)(nil) }
+func Chain[R any, T any](f func(r R) (T, error)) Provider {
+	return Lazy(func(c *Container) (zero T, _ error) {
+		r, err := Inject[R](c)
+		if err != nil {
+			return
+		}
+		return f(r)
+	})
+}

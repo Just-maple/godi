@@ -33,7 +33,7 @@ func NewAppContainer() *godi.Container {
 	c.MustAdd(
 		godi.Provide(appLifecycle),
 		godi.Provide(config.NewConfig()),
-		godi.Lazy(func() (interfaces.Database, error) {
+		godi.Lazy(func(c *godi.Container) (interfaces.Database, error) {
 			cfg, err := godi.Inject[*config.Config](c)
 			if err != nil {
 				return nil, err
@@ -50,7 +50,7 @@ func NewAppContainer() *godi.Container {
 
 			return db, nil
 		}),
-		godi.Lazy(func() (interfaces.Cache, error) {
+		godi.Lazy(func(c *godi.Container) (interfaces.Cache, error) {
 			cfg, err := godi.Inject[*config.Config](c)
 			if err != nil {
 				return nil, err
@@ -67,14 +67,14 @@ func NewAppContainer() *godi.Container {
 
 			return cache, nil
 		}),
-		godi.Lazy(func() (repository.UserRepositoryInterface, error) {
+		godi.Lazy(func(c *godi.Container) (repository.UserRepositoryInterface, error) {
 			db, err := godi.Inject[interfaces.Database](c)
 			if err != nil {
 				return nil, err
 			}
 			return repository.NewUserRepository(db), nil
 		}),
-		godi.Lazy(func() (service.UserServiceInterface, error) {
+		godi.Lazy(func(c *godi.Container) (service.UserServiceInterface, error) {
 			repo, err := godi.Inject[repository.UserRepositoryInterface](c)
 			if err != nil {
 				return nil, err
@@ -86,7 +86,7 @@ func NewAppContainer() *godi.Container {
 			return service.NewUserService(repo, cache), nil
 		}),
 		godi.Provide(handler.NewRouter()),
-		godi.Lazy(func() (interfaces.Handler, error) {
+		godi.Lazy(func(c *godi.Container) (interfaces.Handler, error) {
 			svc, err := godi.Inject[service.UserServiceInterface](c)
 			if err != nil {
 				return nil, err
@@ -97,14 +97,14 @@ func NewAppContainer() *godi.Container {
 			}
 			return handler.NewUserHandler(svc, router), nil
 		}),
-		godi.Lazy(func() (interfaces.Middleware, error) {
+		godi.Lazy(func(c *godi.Container) (interfaces.Middleware, error) {
 			cfg, err := godi.Inject[*config.Config](c)
 			if err != nil {
 				return nil, err
 			}
 			return middleware.NewLoggingMiddleware(cfg.Debug), nil
 		}),
-		godi.Lazy(func() (*app.App, error) {
+		godi.Lazy(func(c *godi.Container) (*app.App, error) {
 			cfg, err := godi.Inject[*config.Config](c)
 			if err != nil {
 				return nil, err

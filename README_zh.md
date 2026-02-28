@@ -65,7 +65,7 @@ c.MustAdd(
 **Lazy** - 注册工厂函数，在首次请求时执行：
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     return sql.Open("mysql", dsn)
 }))
 ```
@@ -116,7 +116,7 @@ func main() {
 延迟昂贵资源的初始化直到首次使用：
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     // 此代码仅在首次请求 Database 时执行
     return sql.Open("mysql", dsn)
 }))
@@ -132,7 +132,7 @@ db, err := godi.Inject[*Database](c)
 ```go
 c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     // 在工厂内部注入依赖
     cfg, err := godi.Inject[Config](c)
     if err != nil {
@@ -151,19 +151,19 @@ c.Add(godi.Lazy(func() (*Database, error) {
 c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 // 第 2 层：Database 依赖 Config
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     cfg, _ := godi.Inject[Config](c)
     return NewDatabase(cfg.DSN)
 }))
 
 // 第 3 层：Repository 依赖 Database
-c.Add(godi.Lazy(func() (*UserRepository, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserRepository, error) {
     db, _ := godi.Inject[*Database](c)
     return NewUserRepository(db)
 }))
 
 // 第 4 层：Service 依赖 Repository
-c.Add(godi.Lazy(func() (*UserService, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserService, error) {
     repo, _ := godi.Inject[*UserRepository](c)
     return NewUserService(repo)
 }))
@@ -180,12 +180,12 @@ svc, err := godi.Inject[*UserService](c)
 type A struct{ B *B }
 type B struct{ A *A }
 
-c.Add(godi.Lazy(func() (A, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (A, error) {
     b, err := godi.Inject[B](c)
     return A{B: b}, err
 }))
 
-c.Add(godi.Lazy(func() (B, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (B, error) {
     a, err := godi.Inject[A](c)
     return B{A: a}, err
 }))
@@ -231,7 +231,7 @@ type Database interface {
 }
 
 // 注册实现
-c.Add(godi.Lazy(func() (Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     return NewMySQLDatabase(dsn)
 }))
 
@@ -246,7 +246,7 @@ db, err := godi.Inject[Database](c)
 ```go
 // 生产环境
 prod := &godi.Container{}
-prod.Add(godi.Lazy(func() (Database, error) {
+prod.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     return NewMySQLDatabase(prodDSN)
 }))
 
@@ -288,7 +288,7 @@ lifecycle := lifecycle.New("MyApp")
 c.Add(godi.Provide(lifecycle))
 
 // 注册数据库并添加清理钩子
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     db := NewDatabase(dsn)
     
     // 注册清理钩子
@@ -300,7 +300,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 }))
 
 // 注册服务并添加关闭钩子
-c.Add(godi.Lazy(func() (*Service, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Service, error) {
     svc := NewService()
     
     // 注册优雅关闭钩子
@@ -318,6 +318,45 @@ lifecycle.Shutdown(shutdownCtx)
 ```
 
 钩子按反向顺序执行（LIFO - 后进先出），确保正确的清理顺序。
+
+### 12. Chain - 转换依赖
+
+使用 Chain 将一个依赖转换为另一个：
+
+```go
+// 简单链：string -> int -> string
+type Name string
+type Length int
+type Result string
+
+c.Add(
+    godi.Provide(Name("hello")),
+    godi.Chain(func(s Name) (Length, error) {
+        return Length(len(s)), nil
+    }),
+    godi.Chain(func(n Length) (Result, error) {
+        return Result(fmt.Sprintf("len%d", n)), nil
+    }),
+)
+
+result, _ := godi.Inject[Result](c)
+// result == "len5"
+
+// 真实场景：Config -> Database -> Repository
+c.Add(
+    godi.Provide(Config{DSN: "mysql://localhost"}),
+    godi.Chain(func(cfg Config) (*Database, error) {
+        return &Database{ConnString: cfg.DSN}, nil
+    }),
+    godi.Chain(func(db *Database) (*Repository, error) {
+        return &Repository{DB: db}, nil
+    }),
+)
+
+repo, _ := godi.Inject[*Repository](c)
+```
+
+Chain 自动接收 Container 用于注入依赖 - 无需显式传递！
 
 ---
 
@@ -353,7 +392,7 @@ lifecycle.Shutdown(shutdownCtx)
 ### 模式 1: 简单懒加载
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     return sql.Open("mysql", dsn)
 }))
 ```
@@ -361,7 +400,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 ### 模式 2: 懒加载带错误处理
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*Database, error) {
     db, err := sql.Open("mysql", dsn)
     if err != nil {
         return nil, err
@@ -376,7 +415,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 ### 模式 3: 懒加载带依赖
 
 ```go
-c.Add(godi.Lazy(func() (*UserService, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*UserService, error) {
     db, err := godi.Inject[*Database](c)
     if err != nil {
         return nil, err
@@ -394,7 +433,7 @@ c.Add(godi.Lazy(func() (*UserService, error) {
 懒加载提供者是单例 - 工厂函数只执行一次：
 
 ```go
-c.Add(godi.Lazy(func() (*ExpensiveResource, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (*ExpensiveResource, error) {
     fmt.Println("Initializing...") // 仅打印一次
     return NewExpensiveResource()
 }))
@@ -409,7 +448,7 @@ r2, _ := godi.Inject[*ExpensiveResource](c)
 ### 模式 5: 条件懒加载
 
 ```go
-c.Add(godi.Lazy(func() (Database, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Database, error) {
     cfg, _ := godi.Inject[Config](c)
     
     if cfg.Environment == "test" {
@@ -423,16 +462,16 @@ c.Add(godi.Lazy(func() (Database, error) {
 
 ```go
 // 5 层依赖链
-c.Add(godi.Lazy(func() (Level1, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Level1, error) {
     return Level1{Value: 1}, nil
 }))
 
-c.Add(godi.Lazy(func() (Level2, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Level2, error) {
     l1, _ := godi.ShouldInject[Level1](c)
     return Level2{Value: l1.Value + 1}, nil
 }))
 
-c.Add(godi.Lazy(func() (Level3, error) {
+c.Add(godi.Lazy(func(c *godi.Container) (Level3, error) {
     l2, _ := godi.Inject[Level2](c)
     return Level3{Value: l2.Value + 1}, nil
 }))
@@ -495,6 +534,7 @@ Godi 支持任何 Go 类型：
 | 08-testing-mock | Mock 测试 |
 | 09-web-app | 生产级 Web 应用 |
 | 10-lifecycle-cleanup | 生命周期管理和清理 |
+| 11-chain | 使用 Chain 转换依赖 |
 
 ## 许可证
 

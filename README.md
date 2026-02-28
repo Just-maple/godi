@@ -8,6 +8,7 @@ A lightweight, type-safe dependency injection container for Go applications.
 ## Features
 
 - **Type-safe**: Leverages Go generics for compile-time type safety
+- **Zero Reflection**: No reflection overhead, all type resolution at compile time
 - **Simple API**: Minimal, intuitive interface for dependency management
 - **Thread-safe**: Built-in mutex protection for concurrent access
 - **Zero dependencies**: Pure Go implementation with no external dependencies
@@ -18,6 +19,37 @@ A lightweight, type-safe dependency injection container for Go applications.
 
 ```bash
 go get github.com/Just-maple/godi
+```
+
+## Comparison
+
+### Godi vs Other DI Containers
+
+| Feature | Godi | dig/fx | wire | Facebook Inject | samber/do |
+|---------|------|--------|------|-----------------|-----------|
+| **Type Resolution** | Generics | Reflection | Code Gen | Reflection | Generics + Reflection |
+| **Error Detection** | Compile-time | Runtime | Compile-time | Runtime | Runtime |
+| **Performance** | Zero overhead | Reflection cost | Zero overhead | Reflection cost | Reflection cost |
+| **Binary Size** | Minimal | Larger | Minimal | Larger | Larger |
+| **IDE Support** | Full autocomplete | Limited | Generated code | Limited | Limited |
+| **Setup** | No setup | No setup | Code generation | No setup | No setup |
+| **Learning Curve** | Low | Medium | High | Medium | Low |
+| **Multi-container** | Built-in | Single | Single | Single | Supported |
+| **Dependencies** | Zero | dig | wire | None | None |
+| **Go Version** | 1.18+ | Any | Any | Any | 1.21+ |
+
+### Why Zero Reflection Matters
+
+```go
+// Reflection-based (dig/fx) - Runtime error possible
+container.Invoke(func(service Service) {})
+// ❌ Error only at runtime if Service not registered
+
+// Godi - Compile-time safety
+db, ok := godi.Inject[Database](c)
+// ✅ Error at compile time if type mismatch
+// ✅ IDE autocomplete works
+// ✅ No reflection overhead
 ```
 
 ## Quick Start

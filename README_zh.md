@@ -43,10 +43,23 @@ c := &godi.Container{}
 
 ### 提供者注册
 
-**Provide** - 注册具体值：
+**Provide** - 注册具体值（可变参数）：
 
 ```go
-c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
+// 一次注册多个提供者
+err := c.Add(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
+if err != nil {
+    // 处理重复注册错误
+}
+
+// 使用 MustAdd 进行链式调用
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
 ```
 
 **Lazy** - 注册工厂函数，在首次请求时执行：
@@ -314,9 +327,8 @@ lifecycle.Shutdown(shutdownCtx)
 
 | 方法 | 描述 |
 |------|------|
-| `Add(p Provider) bool` | 注册提供者。重复时返回 false |
-| `ShouldAdd(p Provider) error` | 注册提供者。重复时返回 error |
-| `MustAdd(p Provider)` | 注册提供者。重复时 panic |
+| `Add(ps ...Provider) error` | 注册提供者（可变参数）。重复时返回 error |
+| `MustAdd(ps ...Provider) *Container` | 注册提供者。重复时 panic。返回容器用于链式调用 |
 
 ### 注入函数
 

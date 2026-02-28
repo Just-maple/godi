@@ -11,59 +11,69 @@ func main() {
 	c := &godi.Container{}
 
 	// Basic types
-	c.Add(godi.Provide("application-name"))
-	c.Add(godi.Provide(42))
-	c.Add(godi.Provide(int8(8)))
-	c.Add(godi.Provide(int16(16)))
-	c.Add(godi.Provide(int32(32)))
-	c.Add(godi.Provide(int64(64)))
-	c.Add(godi.Provide(uint(100)))
-	c.Add(godi.Provide(uint8(8)))
-	c.Add(godi.Provide(uint16(16)))
-	c.Add(godi.Provide(uint32(32)))
-	c.Add(godi.Provide(uint64(64)))
-	c.Add(godi.Provide(float32(3.14)))
-	c.Add(godi.Provide(float64(3.14159)))
-	c.Add(godi.Provide(true))
-	c.Add(godi.Provide(byte('A')))
-	c.Add(godi.Provide(rune('A')))
+	c.MustAdd(
+		godi.Provide("application-name"),
+		godi.Provide(42),
+		godi.Provide(int8(8)),
+		godi.Provide(int16(16)),
+		godi.Provide(int32(32)),
+		godi.Provide(int64(64)),
+		godi.Provide(uint(100)),
+		godi.Provide(uint8(8)),
+		godi.Provide(uint16(16)),
+		godi.Provide(uint32(32)),
+		godi.Provide(uint64(64)),
+		godi.Provide(float32(3.14)),
+		godi.Provide(float64(3.14159)),
+		godi.Provide(true),
+	)
 
 	// Slices
-	c.Add(godi.Provide([]string{"a", "b", "c"}))
-	c.Add(godi.Provide([]int{1, 2, 3}))
-	c.Add(godi.Provide([]byte{0x01, 0x02, 0x03}))
+	c.MustAdd(
+		godi.Provide([]string{"a", "b", "c"}),
+		godi.Provide([]int{1, 2, 3}),
+		godi.Provide([]byte{0x01, 0x02, 0x03}),
+	)
 
 	// Maps
-	c.Add(godi.Provide(map[string]int{"a": 1, "b": 2}))
-	c.Add(godi.Provide(map[string]string{"key": "value"}))
+	c.MustAdd(
+		godi.Provide(map[string]int{"a": 1, "b": 2}),
+		godi.Provide(map[string]string{"key": "value"}),
+	)
 
 	// Arrays
-	c.Add(godi.Provide([3]int{1, 2, 3}))
-	c.Add(godi.Provide([2]string{"x", "y"}))
+	c.MustAdd(
+		godi.Provide([3]int{1, 2, 3}),
+		godi.Provide([2]string{"x", "y"}),
+	)
 
 	// Pointers
 	type User struct {
 		Name string
 	}
-	c.Add(godi.Provide(&User{Name: "Alice"}))
+	c.MustAdd(godi.Provide(&User{Name: "Alice"}))
 
 	// Structs
 	type Config struct {
 		Host string
 		Port int
 	}
-	c.Add(godi.Provide(Config{Host: "localhost", Port: 8080}))
+	c.MustAdd(godi.Provide(Config{Host: "localhost", Port: 8080}))
 
 	// Channels
-	c.Add(godi.Provide(make(chan int, 10)))
-	c.Add(godi.Provide(make(chan string, 5)))
+	c.MustAdd(
+		godi.Provide(make(chan int, 10)),
+		godi.Provide(make(chan string, 5)),
+	)
 
 	// Functions
-	c.Add(godi.Provide(func() string { return "hello" }))
-	c.Add(godi.Provide(func(x int) int { return x * 2 }))
+	c.MustAdd(
+		godi.Provide(func() string { return "hello" }),
+		godi.Provide(func(x int) int { return x * 2 }),
+	)
 
 	// Interfaces
-	c.Add(godi.Provide(any("interface value")))
+	c.MustAdd(godi.Provide(any("interface value")))
 
 	// Inject and verify
 	str, _ := godi.Inject[string](c)

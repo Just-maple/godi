@@ -15,7 +15,7 @@ type Counter struct {
 
 func main() {
 	c := &godi.Container{}
-	c.Add(godi.Provide(Counter{Value: 0}))
+	c.MustAdd(godi.Provide(Counter{Value: 0}))
 
 	var wg sync.WaitGroup
 	numGoroutines := 10

@@ -52,12 +52,12 @@ func main() {
 	userRepo := NewInMemoryRepository[User]()
 	productRepo := NewInMemoryRepository[Product]()
 
-	c.Add(godi.Provide(userRepo))
-	c.Add(godi.Provide(productRepo))
-
-	// Register services
-	c.Add(godi.Provide(&UserService{Repo: userRepo}))
-	c.Add(godi.Provide(&ProductService{Repo: productRepo}))
+	c.MustAdd(
+		godi.Provide(userRepo),
+		godi.Provide(productRepo),
+		godi.Provide(&UserService{Repo: userRepo}),
+		godi.Provide(&ProductService{Repo: productRepo}),
+	)
 
 	// Inject and use
 	userSvc, err := godi.Inject[*UserService](c)

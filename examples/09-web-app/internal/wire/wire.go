@@ -26,116 +26,105 @@ func NewAppContainer() *godi.Container {
 
 	// Register lifecycle manager first (used by all other components)
 	appLifecycle := lifecycle.New("WebApp")
-	c.Add(godi.Provide(appLifecycle))
 
 	// Register Config (concrete type - no interface needed for config)
-	c.Add(godi.Provide(config.NewConfig()))
-
 	// Register Infrastructure (Lazy loading with cleanup hooks)
 	// Note: We register concrete types but depend on interfaces in upper layers
-	c.Add(godi.Lazy(func() (interfaces.Database, error) {
-		cfg, err := godi.Inject[*config.Config](c)
-		if err != nil {
-			return nil, err
-		}
-		db := infrastructure.NewDBConnection(cfg.DatabaseDSN)
-
-		// Register cleanup hook - will be called on shutdown
-		appLifecycle.AddShutdownHook(func(ctx context.Context) error {
-			if closer, ok := db.(interface{ Close() error }); ok {
-				return closer.Close()
+	c.MustAdd(
+		godi.Provide(appLifecycle),
+		godi.Provide(config.NewConfig()),
+		godi.Lazy(func() (interfaces.Database, error) {
+			cfg, err := godi.Inject[*config.Config](c)
+			if err != nil {
+				return nil, err
 			}
-			return nil
-		})
+			db := infrastructure.NewDBConnection(cfg.DatabaseDSN)
 
-		return db, nil
-	}))
+			// Register cleanup hook - will be called on shutdown
+			appLifecycle.AddShutdownHook(func(ctx context.Context) error {
+				if closer, ok := db.(interface{ Close() error }); ok {
+					return closer.Close()
+				}
+				return nil
+			})
 
-	c.Add(godi.Lazy(func() (interfaces.Cache, error) {
-		cfg, err := godi.Inject[*config.Config](c)
-		if err != nil {
-			return nil, err
-		}
-		cache := infrastructure.NewCacheClient(cfg.CacheAddr)
-
-		// Register cleanup hook - will be called on shutdown
-		appLifecycle.AddShutdownHook(func(ctx context.Context) error {
-			if closer, ok := cache.(interface{ Close() error }); ok {
-				return closer.Close()
+			return db, nil
+		}),
+		godi.Lazy(func() (interfaces.Cache, error) {
+			cfg, err := godi.Inject[*config.Config](c)
+			if err != nil {
+				return nil, err
 			}
-			return nil
-		})
+			cache := infrastructure.NewCacheClient(cfg.CacheAddr)
 
-		return cache, nil
-	}))
+			// Register cleanup hook - will be called on shutdown
+			appLifecycle.AddShutdownHook(func(ctx context.Context) error {
+				if closer, ok := cache.(interface{ Close() error }); ok {
+					return closer.Close()
+				}
+				return nil
+			})
 
-	// Register Repository layer - depends on interfaces.Database
-	c.Add(godi.Lazy(func() (repository.UserRepositoryInterface, error) {
-		db, err := godi.Inject[interfaces.Database](c)
-		if err != nil {
-			return nil, err
-		}
-		return repository.NewUserRepository(db), nil
-	}))
-
-	// Register Service layer - depends on interfaces
-	c.Add(godi.Lazy(func() (service.UserServiceInterface, error) {
-		repo, err := godi.Inject[repository.UserRepositoryInterface](c)
-		if err != nil {
-			return nil, err
-		}
-		cache, err := godi.Inject[interfaces.Cache](c)
-		if err != nil {
-			return nil, err
-		}
-		return service.NewUserService(repo, cache), nil
-	}))
-
-	// Register Handler layer - depends on interfaces
-	c.Add(godi.Provide(handler.NewRouter()))
-
-	c.Add(godi.Lazy(func() (interfaces.Handler, error) {
-		svc, err := godi.Inject[service.UserServiceInterface](c)
-		if err != nil {
-			return nil, err
-		}
-		router, err := godi.Inject[*handler.Router](c)
-		if err != nil {
-			return nil, err
-		}
-		return handler.NewUserHandler(svc, router), nil
-	}))
-
-	// Register Middleware - depends on interfaces
-	c.Add(godi.Lazy(func() (interfaces.Middleware, error) {
-		cfg, err := godi.Inject[*config.Config](c)
-		if err != nil {
-			return nil, err
-		}
-		return middleware.NewLoggingMiddleware(cfg.Debug), nil
-	}))
-
-	// Register App - all dependencies are interfaces
-	c.Add(godi.Lazy(func() (*app.App, error) {
-		cfg, err := godi.Inject[*config.Config](c)
-		if err != nil {
-			return nil, err
-		}
-		router := app.NewRouter()
-		h, err := godi.Inject[interfaces.Handler](c)
-		if err != nil {
-			return nil, err
-		}
-		mw, err := godi.Inject[interfaces.Middleware](c)
-		if err != nil {
-			return nil, err
-		}
-		lc, err := godi.Inject[*lifecycle.Lifecycle](c)
-		if err != nil {
-			return nil, err
-		}
-		return app.NewApp(cfg, router, h, mw, lc), nil
-	}))
+			return cache, nil
+		}),
+		godi.Lazy(func() (repository.UserRepositoryInterface, error) {
+			db, err := godi.Inject[interfaces.Database](c)
+			if err != nil {
+				return nil, err
+			}
+			return repository.NewUserRepository(db), nil
+		}),
+		godi.Lazy(func() (service.UserServiceInterface, error) {
+			repo, err := godi.Inject[repository.UserRepositoryInterface](c)
+			if err != nil {
+				return nil, err
+			}
+			cache, err := godi.Inject[interfaces.Cache](c)
+			if err != nil {
+				return nil, err
+			}
+			return service.NewUserService(repo, cache), nil
+		}),
+		godi.Provide(handler.NewRouter()),
+		godi.Lazy(func() (interfaces.Handler, error) {
+			svc, err := godi.Inject[service.UserServiceInterface](c)
+			if err != nil {
+				return nil, err
+			}
+			router, err := godi.Inject[*handler.Router](c)
+			if err != nil {
+				return nil, err
+			}
+			return handler.NewUserHandler(svc, router), nil
+		}),
+		godi.Lazy(func() (interfaces.Middleware, error) {
+			cfg, err := godi.Inject[*config.Config](c)
+			if err != nil {
+				return nil, err
+			}
+			return middleware.NewLoggingMiddleware(cfg.Debug), nil
+		}),
+		godi.Lazy(func() (*app.App, error) {
+			cfg, err := godi.Inject[*config.Config](c)
+			if err != nil {
+				return nil, err
+			}
+			router := app.NewRouter()
+			h, err := godi.Inject[interfaces.Handler](c)
+			if err != nil {
+				return nil, err
+			}
+			mw, err := godi.Inject[interfaces.Middleware](c)
+			if err != nil {
+				return nil, err
+			}
+			lc, err := godi.Inject[*lifecycle.Lifecycle](c)
+			if err != nil {
+				return nil, err
+			}
+			return app.NewApp(cfg, router, h, mw, lc), nil
+		}),
+	)
 
 	return c
 }

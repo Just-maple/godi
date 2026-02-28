@@ -34,29 +34,27 @@ type Container struct {
 	injecting sync.Map
 }
 
-func (c *Container) Add(p Provider) bool {
+func (c *Container) Add(ps ...Provider) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, pv := range c.providers {
-		if pv.ID() == p.ID() {
-			return false
+	for _, p := range ps {
+		for _, pv := range c.providers {
+			if id := p.ID(); pv.ID() == id {
+				return fmt.Errorf("provider %T already exists", id)
+			}
+		}
+		c.providers = append(c.providers, p)
+	}
+	return nil
+}
+
+func (c *Container) MustAdd(ps ...Provider) *Container {
+	for _, p := range ps {
+		if err := c.Add(p); err != nil {
+			panic(err)
 		}
 	}
-	c.providers = append(c.providers, p)
-	return true
-}
-
-func (c *Container) ShouldAdd(p Provider) error {
-	if c.Add(p) {
-		return nil
-	}
-	return fmt.Errorf("provider %T already exists", p.ID())
-}
-
-func (c *Container) MustAdd(p Provider) {
-	if e := c.ShouldAdd(p); e != nil {
-		panic(e)
-	}
+	return c
 }
 
 func InjectTo[T any](v *T, cs ...*Container) error {

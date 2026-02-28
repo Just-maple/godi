@@ -7,6 +7,7 @@ import (
 
 // Must Functions Example: Using MustInject and MustAdd
 // Panics on error - use when dependencies are critical
+// MustAdd returns *Container for method chaining
 
 type CriticalConfig struct {
 	SecretKey string
@@ -19,9 +20,11 @@ type Database struct {
 func main() {
 	c := &godi.Container{}
 
-	// Register critical dependencies
-	c.MustAdd(godi.Provide(CriticalConfig{SecretKey: "super-secret-key"}))
-	c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+	// Use MustAdd with method chaining - panics if duplicate
+	c.MustAdd(
+		godi.Provide(CriticalConfig{SecretKey: "super-secret-key"}),
+		godi.Provide(Database{DSN: "mysql://localhost"}),
+	)
 
 	// Use MustInject - panics if dependency not found
 	config := godi.MustInject[CriticalConfig](c)

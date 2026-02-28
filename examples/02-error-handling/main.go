@@ -6,7 +6,7 @@ import (
 	"github.com/Just-maple/godi"
 )
 
-// Error Handling Example: Using Inject and ShouldAdd
+// Error Handling Example: Using Add and Inject
 // Demonstrates graceful error handling without panics
 
 type Database struct {
@@ -20,16 +20,19 @@ type Config struct {
 func main() {
 	c := &godi.Container{}
 
-	// Use ShouldAdd to handle duplicate registration errors
-	err := c.ShouldAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+	// Use Add to handle duplicate registration errors
+	err := c.Add(
+		godi.Provide(Database{DSN: "mysql://localhost"}),
+		godi.Provide(Config{Port: 8080}),
+	)
 	if err != nil {
 		fmt.Printf("Registration failed: %v\n", err)
 		return
 	}
-	fmt.Println("First registration successful")
+	fmt.Println("Registration successful")
 
 	// Duplicate registration returns error
-	err = c.ShouldAdd(godi.Provide(Database{DSN: "mysql://remote"}))
+	err = c.Add(godi.Provide(Database{DSN: "mysql://remote"}))
 	if err != nil {
 		fmt.Printf("Expected error: %v\n", err)
 	}

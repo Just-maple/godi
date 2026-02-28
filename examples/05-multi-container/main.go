@@ -27,9 +27,9 @@ func main() {
 	configContainer := &godi.Container{}
 
 	// Register different dependencies in different containers
-	dbContainer.Add(godi.Provide(Database{DSN: "mysql://localhost:3306/mydb"}))
-	cacheContainer.Add(godi.Provide(Cache{Host: "redis://localhost", Port: 6379}))
-	configContainer.Add(godi.Provide(Config{AppName: "multi-container-app"}))
+	dbContainer.MustAdd(godi.Provide(Database{DSN: "mysql://localhost:3306/mydb"}))
+	cacheContainer.MustAdd(godi.Provide(Cache{Host: "redis://localhost", Port: 6379}))
+	configContainer.MustAdd(godi.Provide(Config{AppName: "multi-container-app"}))
 
 	// Inject from single container
 	db, err := godi.Inject[Database](dbContainer)

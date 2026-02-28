@@ -43,10 +43,23 @@ c := &godi.Container{}
 
 ### Provider Registration
 
-**Provide** - Register a concrete value:
+**Provide** - Register concrete values (variadic):
 
 ```go
-c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
+// Register multiple providers at once
+err := c.Add(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
+if err != nil {
+    // Handle duplicate registration error
+}
+
+// Method chaining with MustAdd
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
 ```
 
 **Lazy** - Register a factory that executes on first request:
@@ -91,7 +104,10 @@ type Config struct {
 
 func main() {
     c := &godi.Container{}
-    c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
+    c.Add(
+        godi.Provide(Config{DSN: "mysql://localhost"}),
+        godi.Provide(Database{DSN: "mysql://localhost"}),
+    )
     
     cfg, err := godi.Inject[Config](c)
     if err != nil {
@@ -319,9 +335,8 @@ Hooks execute in reverse order (LIFO - Last In, First Out), ensuring proper clea
 
 | Method | Description |
 |--------|-------------|
-| `Add(p Provider) bool` | Register provider. Returns false if duplicate. |
-| `ShouldAdd(p Provider) error` | Register provider. Returns error if duplicate. |
-| `MustAdd(p Provider)` | Register provider. Panics if duplicate. |
+| `Add(ps ...Provider) error` | Register providers. Returns error if duplicate. |
+| `MustAdd(ps ...Provider) *Container` | Register providers. Panics if duplicate. Returns container for chaining. |
 
 ### Injection Functions
 

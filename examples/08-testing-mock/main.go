@@ -48,8 +48,10 @@ func (s *UserService) GetUser(id int) (map[string]interface{}, error) {
 func main() {
 	// Production configuration
 	prodContainer := &godi.Container{}
-	prodContainer.Add(godi.Provide(&RealDatabase{DSN: "mysql://localhost/prod"}))
-	prodContainer.Add(godi.Provide(&UserService{DB: &RealDatabase{DSN: "mysql://localhost/prod"}}))
+	prodContainer.MustAdd(
+		godi.Provide(&RealDatabase{DSN: "mysql://localhost/prod"}),
+		godi.Provide(&UserService{DB: &RealDatabase{DSN: "mysql://localhost/prod"}}),
+	)
 
 	// Test configuration (using Mock)
 	testContainer := &godi.Container{}
@@ -58,8 +60,10 @@ func main() {
 			{"id": 1, "name": "Test User", "email": "test@example.com"},
 		},
 	}
-	testContainer.Add(godi.Provide(mockDB))
-	testContainer.Add(godi.Provide(&UserService{DB: mockDB}))
+	testContainer.MustAdd(
+		godi.Provide(mockDB),
+		godi.Provide(&UserService{DB: mockDB}),
+	)
 
 	// Use test container
 	testUserSvc, _ := godi.Inject[*UserService](testContainer)

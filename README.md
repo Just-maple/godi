@@ -60,11 +60,13 @@ c.Add(godi.Lazy(func() (*Database, error) {
 ### Dependency Retrieval
 
 ```go
-// Returns (value, ok)
-db, ok := godi.Inject[Database](c)
-
-// Returns (value, error)
-db, err := godi.ShouldInject[Database](c)
+// Returns (value, error) - includes lazy factory errors with type information
+db, err := godi.Inject[Database](c)
+if err != nil {
+    // Error includes: "lazy factory error: <original error>"
+    // or "provider *Database not found"
+    // or "circular dependency for *Database"
+}
 
 // Panics if not found
 db := godi.MustInject[Database](c)
@@ -91,16 +93,16 @@ func main() {
     c := &godi.Container{}
     c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
     
-    cfg, ok := godi.Inject[Config](c)
-    if !ok {
-        panic("Config not found")
+    cfg, err := godi.Inject[Config](c)
+    if err != nil {
+        panic(err)
     }
 }
 ```
 
 ### 2. Lazy Loading
 
-Defer expensive initialization until first use:
+Defer expensive initialization until first use. Errors from the factory are returned to the caller:
 
 ```go
 c.Add(godi.Lazy(func() (*Database, error) {
@@ -108,8 +110,11 @@ c.Add(godi.Lazy(func() (*Database, error) {
     return sql.Open("mysql", dsn)
 }))
 
-// Factory executes here
-db, err := godi.ShouldInject[*Database](c)
+// Factory executes here, any error is returned
+db, err := godi.Inject[*Database](c)
+if err != nil {
+    // Handle connection error
+}
 ```
 
 ### 3. Lazy with Dependencies
@@ -121,7 +126,7 @@ c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 c.Add(godi.Lazy(func() (*Database, error) {
     // Inject dependency inside factory
-    cfg, err := godi.ShouldInject[Config](c)
+    cfg, err := godi.Inject[Config](c)
     if err != nil {
         return nil, err
     }
@@ -139,24 +144,24 @@ c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 // Level 2: Database depends on Config
 c.Add(godi.Lazy(func() (*Database, error) {
-    cfg, _ := godi.ShouldInject[Config](c)
+    cfg, _ := godi.Inject[Config](c)
     return NewDatabase(cfg.DSN)
 }))
 
 // Level 3: Repository depends on Database
 c.Add(godi.Lazy(func() (*UserRepository, error) {
-    db, _ := godi.ShouldInject[*Database](c)
+    db, _ := godi.Inject[*Database](c)
     return NewUserRepository(db)
 }))
 
 // Level 4: Service depends on Repository
 c.Add(godi.Lazy(func() (*UserService, error) {
-    repo, _ := godi.ShouldInject[*UserRepository](c)
+    repo, _ := godi.Inject[*UserRepository](c)
     return NewUserService(repo)
 }))
 
 // Inject top-level service (triggers entire chain)
-svc, err := godi.ShouldInject[*UserService](c)
+svc, err := godi.Inject[*UserService](c)
 ```
 
 ### 5. Circular Dependency Detection
@@ -168,17 +173,17 @@ type A struct{ B *B }
 type B struct{ A *A }
 
 c.Add(godi.Lazy(func() (A, error) {
-    b, err := godi.ShouldInject[B](c)
+    b, err := godi.Inject[B](c)
     return A{B: b}, err
 }))
 
 c.Add(godi.Lazy(func() (B, error) {
-    a, err := godi.ShouldInject[A](c)
+    a, err := godi.Inject[A](c)
     return B{A: a}, err
 }))
 
 // Returns error: "circular dependency for main.A"
-_, err := godi.ShouldInject[A](c)
+_, err := godi.Inject[A](c)
 ```
 
 ### 6. Multi-Container Injection
@@ -223,7 +228,7 @@ c.Add(godi.Lazy(func() (Database, error) {
 }))
 
 // Inject interface
-db, err := godi.ShouldInject[Database](c)
+db, err := godi.Inject[Database](c)
 ```
 
 ### 9. Testing with Mocks
@@ -265,6 +270,47 @@ c.Add(godi.Provide(AppConfig{
 cfg, _ := godi.Inject[AppConfig](c)
 ```
 
+### 11. Lifecycle Management and Cleanup
+
+Register cleanup hooks during initialization for graceful shutdown:
+
+```go
+// Create lifecycle manager
+lifecycle := lifecycle.New("MyApp")
+c.Add(godi.Provide(lifecycle))
+
+// Register database with cleanup hook
+c.Add(godi.Lazy(func() (*Database, error) {
+    db := NewDatabase(dsn)
+    
+    // Register cleanup hook
+    lifecycle.AddShutdownHook(func(ctx context.Context) error {
+        return db.Close()
+    })
+    
+    return db, nil
+}))
+
+// Register service with shutdown hook
+c.Add(godi.Lazy(func() (*Service, error) {
+    svc := NewService()
+    
+    // Register graceful shutdown hook
+    lifecycle.AddShutdownHook(func(ctx context.Context) error {
+        return svc.Shutdown(ctx)
+    })
+    
+    return svc, nil
+}))
+
+// On application exit, shutdown in reverse order
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+lifecycle.Shutdown(shutdownCtx)
+```
+
+Hooks execute in reverse order (LIFO - Last In, First Out), ensuring proper cleanup order.
+
 ---
 
 ## API Reference
@@ -281,8 +327,7 @@ cfg, _ := godi.Inject[AppConfig](c)
 
 | Function | Signature | Behavior |
 |----------|-----------|----------|
-| `Inject[T](c)` | `(T, bool)` | Returns zero value + false if not found |
-| `ShouldInject[T](c)` | `(T, error)` | Returns error if not found or circular |
+| `Inject[T](c)` | `(T, error)` | Returns error if not found or circular |
 | `MustInject[T](c)` | `T` | Panics if not found |
 | `InjectTo[T](&v, c)` | `error` | Injects into provided pointer |
 | `MustInjectTo[T](&v, c)` | - | Injects into pointer, panics on failure |
@@ -325,11 +370,11 @@ c.Add(godi.Lazy(func() (*Database, error) {
 
 ```go
 c.Add(godi.Lazy(func() (*UserService, error) {
-    db, err := godi.ShouldInject[*Database](c)
+    db, err := godi.Inject[*Database](c)
     if err != nil {
         return nil, err
     }
-    cache, err := godi.ShouldInject[*Cache](c)
+    cache, err := godi.Inject[*Cache](c)
     if err != nil {
         return nil, err
     }
@@ -358,7 +403,7 @@ r2, _ := godi.Inject[*ExpensiveResource](c)
 
 ```go
 c.Add(godi.Lazy(func() (Database, error) {
-    cfg, _ := godi.ShouldInject[Config](c)
+    cfg, _ := godi.Inject[Config](c)
     
     if cfg.Environment == "test" {
         return NewMockDatabase(), nil
@@ -420,6 +465,7 @@ See [examples/](examples/) for complete examples:
 | 07-generics | Generic types |
 | 08-testing-mock | Mock testing |
 | 09-web-app | Production web app |
+| 10-lifecycle-cleanup | Lifecycle management and cleanup |
 
 ## License
 

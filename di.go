@@ -1,27 +1,30 @@
 package godi
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
 
+var errTypeMismatch = errors.New("type mismatch")
+
 type Provider interface {
-	Inject(any) bool
+	Inject(any) error
 	ID() any
 }
 
-type prov[T any] func(any) bool
+type prov[T any] func(any) error
 
-func (p prov[T]) Inject(ptr any) bool { return p(ptr) }
-func (p prov[T]) ID() any             { return (*T)(nil) }
+func (p prov[T]) Inject(ptr any) error { return p(ptr) }
+func (p prov[T]) ID() any              { return (*T)(nil) }
 
 func Provide[T any](v T) Provider {
-	return prov[T](func(dst any) bool {
+	return prov[T](func(dst any) error {
 		if p, ok := dst.(*T); ok {
 			*p = v
-			return true
+			return nil
 		}
-		return false
+		return errTypeMismatch
 	})
 }
 
@@ -67,9 +70,12 @@ func InjectTo[T any](v *T, cs ...*Container) error {
 		ps := c.providers
 		c.mu.Unlock()
 		for _, p := range ps {
-			if p.Inject(v) {
+			if err := p.Inject(v); err == nil {
 				c.injecting.Delete(id)
 				return nil
+			} else if !errors.Is(err, errTypeMismatch) {
+				c.injecting.Delete(id)
+				return err
 			}
 		}
 		c.injecting.Delete(id)
@@ -83,23 +89,23 @@ func MustInjectTo[T any](v *T, c ...*Container) {
 	}
 }
 
-func Inject[T any](c ...*Container) (v T, b bool) {
-	return v, InjectTo(&v, c...) == nil
-}
-
-func ShouldInject[T any](c ...*Container) (v T, err error) {
+func Inject[T any](c ...*Container) (T, error) {
+	var v T
 	return v, InjectTo(&v, c...)
 }
 
 func MustInject[T any](c ...*Container) T {
-	v, e := ShouldInject[T](c...)
+	v, e := Inject[T](c...)
 	if e != nil {
 		panic(e)
 	}
 	return v
 }
 
-func Lazy[T any](f func() (T, error)) Provider { return &lazy[T]{f: f} }
+func Lazy[T any](f func() (T, error)) Provider {
+	l := &lazy[T]{f: f}
+	return l
+}
 
 type lazy[T any] struct {
 	f     func() (T, error)
@@ -108,15 +114,17 @@ type lazy[T any] struct {
 	err   error
 }
 
-func (l *lazy[T]) Inject(ptr any) bool {
+func (l *lazy[T]) Inject(ptr any) error {
 	p, ok := ptr.(*T)
 	if !ok {
-		return false
+		return errTypeMismatch
 	}
-	if l.once.Do(func() { l.value, l.err = l.f() }); l.err == nil {
-		*p = l.value
+	l.once.Do(func() { l.value, l.err = l.f() })
+	if l.err != nil {
+		return fmt.Errorf("create %T error: %w", l.value, l.err)
 	}
-	return l.err == nil
+	*p = l.value
+	return nil
 }
 
 func (l *lazy[T]) ID() any { return (*T)(nil) }

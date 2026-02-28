@@ -2,7 +2,9 @@
 package wire
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/Just-maple/godi"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/Just-maple/godi/examples/09-web-app/internal/config"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/handler"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/infrastructure"
+	"github.com/Just-maple/godi/examples/09-web-app/internal/lifecycle"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/middleware"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/repository"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/service"
@@ -21,30 +24,54 @@ import (
 func NewAppContainer() *godi.Container {
 	c := &godi.Container{}
 
+	// Register lifecycle manager first (used by all other components)
+	appLifecycle := lifecycle.New("WebApp")
+	c.Add(godi.Provide(appLifecycle))
+
 	// Register Config (concrete type - no interface needed for config)
 	c.Add(godi.Provide(config.NewConfig()))
 
-	// Register Infrastructure (Lazy loading)
+	// Register Infrastructure (Lazy loading with cleanup hooks)
 	// Note: We register concrete types but depend on interfaces in upper layers
 	c.Add(godi.Lazy(func() (interfaces.Database, error) {
-		cfg, err := godi.ShouldInject[*config.Config](c)
+		cfg, err := godi.Inject[*config.Config](c)
 		if err != nil {
 			return nil, err
 		}
-		return infrastructure.NewDBConnection(cfg.DatabaseDSN), nil
+		db := infrastructure.NewDBConnection(cfg.DatabaseDSN)
+
+		// Register cleanup hook - will be called on shutdown
+		appLifecycle.AddShutdownHook(func(ctx context.Context) error {
+			if closer, ok := db.(interface{ Close() error }); ok {
+				return closer.Close()
+			}
+			return nil
+		})
+
+		return db, nil
 	}))
 
 	c.Add(godi.Lazy(func() (interfaces.Cache, error) {
-		cfg, err := godi.ShouldInject[*config.Config](c)
+		cfg, err := godi.Inject[*config.Config](c)
 		if err != nil {
 			return nil, err
 		}
-		return infrastructure.NewCacheClient(cfg.CacheAddr), nil
+		cache := infrastructure.NewCacheClient(cfg.CacheAddr)
+
+		// Register cleanup hook - will be called on shutdown
+		appLifecycle.AddShutdownHook(func(ctx context.Context) error {
+			if closer, ok := cache.(interface{ Close() error }); ok {
+				return closer.Close()
+			}
+			return nil
+		})
+
+		return cache, nil
 	}))
 
 	// Register Repository layer - depends on interfaces.Database
 	c.Add(godi.Lazy(func() (repository.UserRepositoryInterface, error) {
-		db, err := godi.ShouldInject[interfaces.Database](c)
+		db, err := godi.Inject[interfaces.Database](c)
 		if err != nil {
 			return nil, err
 		}
@@ -53,11 +80,11 @@ func NewAppContainer() *godi.Container {
 
 	// Register Service layer - depends on interfaces
 	c.Add(godi.Lazy(func() (service.UserServiceInterface, error) {
-		repo, err := godi.ShouldInject[repository.UserRepositoryInterface](c)
+		repo, err := godi.Inject[repository.UserRepositoryInterface](c)
 		if err != nil {
 			return nil, err
 		}
-		cache, err := godi.ShouldInject[interfaces.Cache](c)
+		cache, err := godi.Inject[interfaces.Cache](c)
 		if err != nil {
 			return nil, err
 		}
@@ -68,11 +95,11 @@ func NewAppContainer() *godi.Container {
 	c.Add(godi.Provide(handler.NewRouter()))
 
 	c.Add(godi.Lazy(func() (interfaces.Handler, error) {
-		svc, err := godi.ShouldInject[service.UserServiceInterface](c)
+		svc, err := godi.Inject[service.UserServiceInterface](c)
 		if err != nil {
 			return nil, err
 		}
-		router, err := godi.ShouldInject[*handler.Router](c)
+		router, err := godi.Inject[*handler.Router](c)
 		if err != nil {
 			return nil, err
 		}
@@ -81,7 +108,7 @@ func NewAppContainer() *godi.Container {
 
 	// Register Middleware - depends on interfaces
 	c.Add(godi.Lazy(func() (interfaces.Middleware, error) {
-		cfg, err := godi.ShouldInject[*config.Config](c)
+		cfg, err := godi.Inject[*config.Config](c)
 		if err != nil {
 			return nil, err
 		}
@@ -90,32 +117,37 @@ func NewAppContainer() *godi.Container {
 
 	// Register App - all dependencies are interfaces
 	c.Add(godi.Lazy(func() (*app.App, error) {
-		cfg, err := godi.ShouldInject[*config.Config](c)
+		cfg, err := godi.Inject[*config.Config](c)
 		if err != nil {
 			return nil, err
 		}
 		router := app.NewRouter()
-		h, err := godi.ShouldInject[interfaces.Handler](c)
+		h, err := godi.Inject[interfaces.Handler](c)
 		if err != nil {
 			return nil, err
 		}
-		mw, err := godi.ShouldInject[interfaces.Middleware](c)
+		mw, err := godi.Inject[interfaces.Middleware](c)
 		if err != nil {
 			return nil, err
 		}
-		return app.NewApp(cfg, router, h, mw), nil
+		lc, err := godi.Inject[*lifecycle.Lifecycle](c)
+		if err != nil {
+			return nil, err
+		}
+		return app.NewApp(cfg, router, h, mw, lc), nil
 	}))
 
 	return c
 }
 
-// Run starts the application
+// Run starts the application and handles graceful shutdown
 func Run() error {
 	container := NewAppContainer()
 	fmt.Println("✓ Container created (Lazy loading)")
 	fmt.Println("✓ Using Dependency Inversion Principle")
+	fmt.Println("✓ Lifecycle hooks registered")
 
-	appInstance, err := godi.ShouldInject[*app.App](container)
+	appInstance, err := godi.Inject[*app.App](container)
 	if err != nil {
 		return fmt.Errorf("failed to inject App: %w", err)
 	}
@@ -123,5 +155,14 @@ func Run() error {
 	fmt.Println("✓ All dependencies injected")
 	fmt.Println()
 
-	return appInstance.Start()
+	// Start the application
+	if err := appInstance.Start(); err != nil {
+		return err
+	}
+
+	// Perform graceful shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return appInstance.Shutdown(shutdownCtx)
 }

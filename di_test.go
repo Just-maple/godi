@@ -25,9 +25,9 @@ func TestProvide(t *testing.T) {
 	provider := Provide(db)
 
 	var got Database
-	ok := provider.Inject(&got)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	err := provider.Inject(&got)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got.DSN != db.DSN {
 		t.Errorf("expected DSN %s, got %s", db.DSN, got.DSN)
@@ -44,7 +44,7 @@ func TestContainer_AddAndInject(t *testing.T) {
 	_ = c.Add(Provide(Database{DSN: "mysql://localhost:3306/test"}))
 	_ = c.Add(Provide(Config{AppName: "test-app"}))
 
-	gotDB, err := ShouldInject[Database](c)
+	gotDB, err := Inject[Database](c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestContainer_AddAndInject(t *testing.T) {
 		t.Errorf("expected mysql://localhost:3306/test, got %s", gotDB.DSN)
 	}
 
-	gotCfg, err := ShouldInject[Config](c)
+	gotCfg, err := Inject[Config](c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,47 +114,47 @@ func TestLazyDependencyOrderIndependent_Shuffle(t *testing.T) {
 						c.Add(Lazy(func() (L0, error) { return 1, nil }))
 					case 1:
 						c.Add(Lazy(func() (L1, error) {
-							v, err := ShouldInject[L0](c)
+							v, err := Inject[L0](c)
 							return L1(v) + 1, err
 						}))
 					case 2:
 						c.Add(Lazy(func() (L2, error) {
-							v, err := ShouldInject[L1](c)
+							v, err := Inject[L1](c)
 							return L2(v) + 1, err
 						}))
 					case 3:
 						c.Add(Lazy(func() (L3, error) {
-							v, err := ShouldInject[L2](c)
+							v, err := Inject[L2](c)
 							return L3(v) + 1, err
 						}))
 					case 4:
 						c.Add(Lazy(func() (L4, error) {
-							v, err := ShouldInject[L3](c)
+							v, err := Inject[L3](c)
 							return L4(v) + 1, err
 						}))
 					case 5:
 						c.Add(Lazy(func() (L5, error) {
-							v, err := ShouldInject[L4](c)
+							v, err := Inject[L4](c)
 							return L5(v) + 1, err
 						}))
 					case 6:
 						c.Add(Lazy(func() (L6, error) {
-							v, err := ShouldInject[L5](c)
+							v, err := Inject[L5](c)
 							return L6(v) + 1, err
 						}))
 					case 7:
 						c.Add(Lazy(func() (L7, error) {
-							v, err := ShouldInject[L6](c)
+							v, err := Inject[L6](c)
 							return L7(v) + 1, err
 						}))
 					case 8:
 						c.Add(Lazy(func() (L8, error) {
-							v, err := ShouldInject[L7](c)
+							v, err := Inject[L7](c)
 							return L8(v) + 1, err
 						}))
 					case 9:
 						c.Add(Lazy(func() (L9, error) {
-							v, err := ShouldInject[L8](c)
+							v, err := Inject[L8](c)
 							return L9(v) + 1, err
 						}))
 					}
@@ -163,11 +163,11 @@ func TestLazyDependencyOrderIndependent_Shuffle(t *testing.T) {
 				var err error
 				switch tt.nodeCount {
 				case 5:
-					_, err = ShouldInject[L4](c)
+					_, err = Inject[L4](c)
 				case 8:
-					_, err = ShouldInject[L7](c)
+					_, err = Inject[L7](c)
 				case 10:
-					_, err = ShouldInject[L9](c)
+					_, err = Inject[L9](c)
 				}
 				if err != nil {
 					t.Fatalf("iter %d: injection failed: %v", iter, err)
@@ -242,29 +242,29 @@ func TestLazyLargeDependencyGraph(t *testing.T) {
 					case 1:
 						c.Add(Lazy(func(d []int) func() (L1, error) {
 							return func() (L1, error) {
-								v, _ := ShouldInject[L0](c)
+								v, _ := Inject[L0](c)
 								return L1(int(v) + 10), nil
 							}
 						}(nodeDeps)))
 					case 2:
 						c.Add(Lazy(func(d []int) func() (L2, error) {
 							return func() (L2, error) {
-								v, _ := ShouldInject[L0](c)
+								v, _ := Inject[L0](c)
 								return L2(int(v) + 20), nil
 							}
 						}(nodeDeps)))
 					case 3:
 						c.Add(Lazy(func(d []int) func() (L3, error) {
 							return func() (L3, error) {
-								v1, _ := ShouldInject[L1](c)
-								v2, _ := ShouldInject[L2](c)
+								v1, _ := Inject[L1](c)
+								v2, _ := Inject[L2](c)
 								return L3(int(v1) + int(v2) + 30), nil
 							}
 						}(nodeDeps)))
 					case 4:
 						c.Add(Lazy(func(d []int) func() (L4, error) {
 							return func() (L4, error) {
-								v, _ := ShouldInject[L3](c)
+								v, _ := Inject[L3](c)
 								return L4(int(v) + 40), nil
 							}
 						}(nodeDeps)))
@@ -278,7 +278,7 @@ func TestLazyLargeDependencyGraph(t *testing.T) {
 					c.providers = append(c.providers, providers[idx])
 				}
 
-				_, err := ShouldInject[L4](c)
+				_, err := Inject[L4](c)
 				if err != nil {
 					t.Fatalf("run %d: injection failed: %v", run, err)
 				}
@@ -521,9 +521,9 @@ func TestProvide_PointerType(t *testing.T) {
 	dbPtr := &Database{DSN: "mysql://localhost"}
 	c.Add(Provide(dbPtr))
 
-	got, ok := Inject[*Database](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[*Database](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got.DSN != "mysql://localhost" {
 		t.Errorf("expected mysql://localhost, got %s", got.DSN)
@@ -535,9 +535,9 @@ func TestProvide_SliceType(t *testing.T) {
 	slice := []string{"a", "b", "c"}
 	c.Add(Provide(slice))
 
-	got, ok := Inject[[]string](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[[]string](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if len(got) != 3 {
 		t.Errorf("expected length 3, got %d", len(got))
@@ -549,9 +549,9 @@ func TestProvide_MapType(t *testing.T) {
 	m := map[string]int{"a": 1, "b": 2}
 	c.Add(Provide(m))
 
-	got, ok := Inject[map[string]int](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[map[string]int](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got["a"] != 1 || got["b"] != 2 {
 		t.Errorf("expected map values, got %v", got)
@@ -562,9 +562,9 @@ func TestProvide_BoolType(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(true))
 
-	got, ok := Inject[bool](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[bool](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if !got {
 		t.Errorf("expected true, got %v", got)
@@ -575,9 +575,9 @@ func TestProvide_FloatType(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(3.14))
 
-	got, ok := Inject[float64](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[float64](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got != 3.14 {
 		t.Errorf("expected 3.14, got %v", got)
@@ -598,15 +598,15 @@ func TestContainer_MultipleProviders(t *testing.T) {
 func TestInject_EmptyContainer(t *testing.T) {
 	c := &Container{}
 
-	_, ok := Inject[Database](c)
-	if ok {
-		t.Fatal("expected Inject to return false for empty container")
+	_, err := Inject[Database](c)
+	if err == nil {
+		t.Fatal("expected Inject to return error for empty container")
 	}
 }
 
-func TestShouldInject_ErrorMessage(t *testing.T) {
+func TestInject_ErrorMessage(t *testing.T) {
 	c := &Container{}
-	_, err := ShouldInject[Database](c)
+	_, err := Inject[Database](c)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -638,11 +638,11 @@ func ExampleMustInject() {
 	// Output: DB: mysql://localhost
 }
 
-func ExampleShouldInject() {
+func ExampleInject() {
 	c := &Container{}
 	c.Add(Provide(Config{AppName: "my-app"}))
 
-	cfg, err := ShouldInject[Config](c)
+	cfg, err := Inject[Config](c)
 	fmt.Printf("App: %s, Error: %v\n", cfg.AppName, err)
 	// Output: App: my-app, Error: <nil>
 }
@@ -679,23 +679,23 @@ func TestProvide_IntTypes(t *testing.T) {
 	c.Add(Provide(int32(32)))
 	c.Add(Provide(int64(64)))
 
-	i8, ok := Inject[int8](c)
-	if !ok || i8 != 8 {
+	i8, err := Inject[int8](c)
+	if err != nil || i8 != 8 {
 		t.Errorf("expected int8(8), got %v", i8)
 	}
 
-	i16, ok := Inject[int16](c)
-	if !ok || i16 != 16 {
+	i16, err := Inject[int16](c)
+	if err != nil || i16 != 16 {
 		t.Errorf("expected int16(16), got %v", i16)
 	}
 
-	i32, ok := Inject[int32](c)
-	if !ok || i32 != 32 {
+	i32, err := Inject[int32](c)
+	if err != nil || i32 != 32 {
 		t.Errorf("expected int32(32), got %v", i32)
 	}
 
-	i64, ok := Inject[int64](c)
-	if !ok || i64 != 64 {
+	i64, err := Inject[int64](c)
+	if err != nil || i64 != 64 {
 		t.Errorf("expected int64(64), got %v", i64)
 	}
 }
@@ -708,28 +708,28 @@ func TestProvide_UIntTypes(t *testing.T) {
 	c.Add(Provide(uint32(32)))
 	c.Add(Provide(uint64(64)))
 
-	u, ok := Inject[uint](c)
-	if !ok || u != 100 {
+	u, err := Inject[uint](c)
+	if err != nil || u != 100 {
 		t.Errorf("expected uint(100), got %v", u)
 	}
 
-	u8, ok := Inject[uint8](c)
-	if !ok || u8 != 8 {
+	u8, err := Inject[uint8](c)
+	if err != nil || u8 != 8 {
 		t.Errorf("expected uint8(8), got %v", u8)
 	}
 
-	u16, ok := Inject[uint16](c)
-	if !ok || u16 != 16 {
+	u16, err := Inject[uint16](c)
+	if err != nil || u16 != 16 {
 		t.Errorf("expected uint16(16), got %v", u16)
 	}
 
-	u32, ok := Inject[uint32](c)
-	if !ok || u32 != 32 {
+	u32, err := Inject[uint32](c)
+	if err != nil || u32 != 32 {
 		t.Errorf("expected uint32(32), got %v", u32)
 	}
 
-	u64, ok := Inject[uint64](c)
-	if !ok || u64 != 64 {
+	u64, err := Inject[uint64](c)
+	if err != nil || u64 != 64 {
 		t.Errorf("expected uint64(64), got %v", u64)
 	}
 }
@@ -739,13 +739,13 @@ func TestProvide_ByteAndRune(t *testing.T) {
 	c.Add(Provide(byte('A')))
 	c.Add(Provide(rune('中')))
 
-	b, ok := Inject[byte](c)
-	if !ok || b != 'A' {
+	b, err := Inject[byte](c)
+	if err != nil || b != 'A' {
 		t.Errorf("expected byte('A'), got %v", b)
 	}
 
-	r, ok := Inject[rune](c)
-	if !ok || r != '中' {
+	r, err := Inject[rune](c)
+	if err != nil || r != '中' {
 		t.Errorf("expected rune('中'), got %v", r)
 	}
 }
@@ -755,9 +755,9 @@ func TestProvide_ArrayType(t *testing.T) {
 	arr := [3]int{1, 2, 3}
 	c.Add(Provide(arr))
 
-	got, ok := Inject[[3]int](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[[3]int](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got != arr {
 		t.Errorf("expected %v, got %v", arr, got)
@@ -769,9 +769,9 @@ func TestProvide_Channel(t *testing.T) {
 	ch := make(chan int, 10)
 	c.Add(Provide(ch))
 
-	got, ok := Inject[chan int](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[chan int](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got != ch {
 		t.Error("expected same channel")
@@ -783,9 +783,9 @@ func TestProvide_Function(t *testing.T) {
 	fn := func() string { return "hello" }
 	c.Add(Provide(fn))
 
-	got, ok := Inject[func() string](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[func() string](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got() != "hello" {
 		t.Errorf("expected 'hello', got %s", got())
@@ -797,9 +797,9 @@ func TestProvide_FunctionWithArgs(t *testing.T) {
 	fn := func(x int) int { return x * 2 }
 	c.Add(Provide(fn))
 
-	got, ok := Inject[func(int) int](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[func(int) int](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got(5) != 10 {
 		t.Errorf("expected 10, got %d", got(5))
@@ -810,9 +810,9 @@ func TestProvide_Interface(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(any("interface value")))
 
-	got, ok := Inject[any](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[any](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got != "interface value" {
 		t.Errorf("expected 'interface value', got %v", got)
@@ -824,9 +824,9 @@ func TestProvide_ByteSlice(t *testing.T) {
 	bs := []byte{0x01, 0x02, 0x03}
 	c.Add(Provide(bs))
 
-	got, ok := Inject[[]byte](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[[]byte](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if len(got) != 3 || got[0] != 0x01 {
 		t.Errorf("expected [0x01, 0x02, 0x03], got %v", got)
@@ -849,9 +849,9 @@ func TestProvide_NestedStruct(t *testing.T) {
 	}
 	c.Add(Provide(outer))
 
-	got, ok := Inject[Outer](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[Outer](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got.Inner.Value != "nested" || got.Count != 42 {
 		t.Errorf("expected nested struct, got %v", got)
@@ -864,9 +864,9 @@ func TestProvide_EmptyStruct(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(Empty{}))
 
-	got, ok := Inject[Empty](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[Empty](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	_ = got
 }
@@ -879,9 +879,9 @@ func TestProvide_StructWithSlice(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(Data{Items: []string{"a", "b", "c"}}))
 
-	got, ok := Inject[Data](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[Data](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if len(got.Items) != 3 {
 		t.Errorf("expected 3 items, got %d", len(got.Items))
@@ -896,9 +896,9 @@ func TestProvide_StructWithMap(t *testing.T) {
 	c := &Container{}
 	c.Add(Provide(Data{Config: map[string]int{"a": 1, "b": 2}}))
 
-	got, ok := Inject[Data](c)
-	if !ok {
-		t.Fatal("expected Inject to return true")
+	got, err := Inject[Data](c)
+	if err != nil {
+		t.Fatal("expected Inject to succeed")
 	}
 	if got.Config["a"] != 1 || got.Config["b"] != 2 {
 		t.Errorf("expected map values, got %v", got.Config)
@@ -964,8 +964,8 @@ func TestProvider_Inject_WrongType(t *testing.T) {
 	p := Provide(Database{DSN: "test"})
 
 	var cfg Config
-	ok := p.Inject(&cfg)
-	if ok {
+	err := p.Inject(&cfg)
+	if err == nil {
 		t.Fatal("expected Inject to return false for wrong type")
 	}
 }
@@ -973,8 +973,8 @@ func TestProvider_Inject_WrongType(t *testing.T) {
 func TestProvider_Inject_NilPointer(t *testing.T) {
 	p := Provide(Database{DSN: "test"})
 
-	ok := p.Inject(nil)
-	if ok {
+	err := p.Inject(nil)
+	if err == nil {
 		t.Fatal("expected Inject to return false for nil pointer")
 	}
 }
@@ -1005,18 +1005,18 @@ func TestMultiContainerInjection(t *testing.T) {
 	c2.Add(Provide(Config{AppName: "app2"}))
 	c3.Add(Provide(Service{Name: "svc3"}))
 
-	db, ok := Inject[Database](c1, c2, c3)
-	if !ok || db.DSN != "db1" {
+	db, err := Inject[Database](c1, c2, c3)
+	if err != nil || db.DSN != "db1" {
 		t.Errorf("expected db1, got %v", db)
 	}
 
-	cfg, ok := Inject[Config](c1, c2, c3)
-	if !ok || cfg.AppName != "app2" {
+	cfg, err := Inject[Config](c1, c2, c3)
+	if err != nil || cfg.AppName != "app2" {
 		t.Errorf("expected app2, got %v", cfg)
 	}
 
-	svc, ok := Inject[Service](c1, c2, c3)
-	if !ok || svc.Name != "svc3" {
+	svc, err := Inject[Service](c1, c2, c3)
+	if err != nil || svc.Name != "svc3" {
 		t.Errorf("expected svc3, got %v", svc)
 	}
 }
@@ -1047,13 +1047,13 @@ func TestMultiContainerInjection_NotFound(t *testing.T) {
 
 	c1.Add(Provide(Database{DSN: "db1"}))
 
-	_, ok := Inject[Config](c1, c2)
-	if ok {
-		t.Error("expected Inject to return false for non-existent provider")
+	_, err := Inject[Config](c1, c2)
+	if err == nil {
+		t.Error("expected Inject to return error for non-existent provider")
 	}
 
 	var cfg Config
-	err := InjectTo(&cfg, c1, c2)
+	err = InjectTo(&cfg, c1, c2)
 	if err == nil {
 		t.Error("expected InjectTo to fail for non-existent provider")
 	}
@@ -1096,7 +1096,7 @@ func TestInvoke(t *testing.T) {
 	}))
 
 	c.Add(Lazy(func() (v float64, err error) {
-		r, err := ShouldInject[int](c)
+		r, err := Inject[int](c)
 		if err != nil {
 			return
 		}
@@ -1110,7 +1110,7 @@ func TestInvoke(t *testing.T) {
 		return 5, nil
 	}))
 
-	v, err := ShouldInject[Config](c)
+	v, err := Inject[Config](c)
 	t.Log(v, err)
 }
 
@@ -1118,7 +1118,7 @@ func TestCircularDependency(t *testing.T) {
 	c := &Container{}
 
 	c.Add(Lazy(func() (v int, err error) {
-		_, err = ShouldInject[string](c)
+		_, err = Inject[string](c)
 		if err != nil {
 			return 0, err
 		}
@@ -1126,14 +1126,14 @@ func TestCircularDependency(t *testing.T) {
 	}))
 
 	c.Add(Lazy(func() (v string, err error) {
-		_, err = ShouldInject[int](c)
+		_, err = Inject[int](c)
 		if err != nil {
 			return "", err
 		}
 		return "ok", nil
 	}))
 
-	_, err := ShouldInject[int](c)
+	_, err := Inject[int](c)
 	if err == nil {
 		t.Fatal("expected circular dependency error")
 	}
@@ -1169,7 +1169,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				c := &Container{}
 				c.Add(Provide("static-string"))
 				c.Add(Lazy(func() (v int, err error) {
-					s, err := ShouldInject[string](c)
+					s, err := Inject[string](c)
 					if err != nil {
 						return 0, err
 					}
@@ -1179,7 +1179,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 					return 42, nil
 				}))
 				c.Add(Lazy(func() (v float64, err error) {
-					i, err := ShouldInject[int](c)
+					i, err := Inject[int](c)
 					if err != nil {
 						return 0, err
 					}
@@ -1188,7 +1188,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[float64](c)
+				return Inject[float64](c)
 			},
 			validate: func(got any) error {
 				v := got.(float64)
@@ -1203,14 +1203,14 @@ func TestComplexDependencyScenarios(t *testing.T) {
 			setup: func() *Container {
 				c := &Container{}
 				c.Add(Lazy(func() (v string, err error) {
-					i, err := ShouldInject[int](c)
+					i, err := Inject[int](c)
 					if err != nil {
 						return "", err
 					}
 					return fmt.Sprintf("int-%d", i), nil
 				}))
 				c.Add(Lazy(func() (v int, err error) {
-					f, err := ShouldInject[float64](c)
+					f, err := Inject[float64](c)
 					if err != nil {
 						return 0, err
 					}
@@ -1222,7 +1222,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[string](c)
+				return Inject[string](c)
 			},
 			validate: func(got any) error {
 				v := got.(string)
@@ -1238,21 +1238,21 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				c := &Container{}
 				c.Add(Lazy(func() (v int, err error) { return 1, nil }))
 				c.Add(Lazy(func() (v int, err error) {
-					prev, err := ShouldInject[int](c)
+					prev, err := Inject[int](c)
 					if err != nil {
 						return 0, err
 					}
 					return prev + 1, nil
 				}))
 				c.Add(Lazy(func() (v testLevel2, err error) {
-					i, err := ShouldInject[int](c)
+					i, err := Inject[int](c)
 					if err != nil {
 						return testLevel2{}, err
 					}
 					return testLevel2{Value: i * 10}, nil
 				}))
 				c.Add(Lazy(func() (v testLevel3, err error) {
-					l2, err := ShouldInject[testLevel2](c)
+					l2, err := Inject[testLevel2](c)
 					if err != nil {
 						return testLevel3{}, err
 					}
@@ -1261,7 +1261,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[testLevel3](c)
+				return Inject[testLevel3](c)
 			},
 			validate: func(got any) error {
 				v := got.(testLevel3)
@@ -1279,7 +1279,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 					return testConfig{Name: "my-app"}, nil
 				}))
 				c.Add(Lazy(func() (v int, err error) {
-					cfg, err := ShouldInject[testConfig](c)
+					cfg, err := Inject[testConfig](c)
 					if err != nil {
 						return 0, err
 					}
@@ -1289,18 +1289,18 @@ func TestComplexDependencyScenarios(t *testing.T) {
 					return 9090, nil
 				}))
 				c.Add(Lazy(func() (v testService, err error) {
-					cfg, err := ShouldInject[testConfig](c)
+					cfg, err := Inject[testConfig](c)
 					if err != nil {
 						return testService{}, err
 					}
-					port, err := ShouldInject[int](c)
+					port, err := Inject[int](c)
 					if err != nil {
 						return testService{}, err
 					}
 					return testService{Config: cfg, Port: port}, nil
 				}))
 				c.Add(Lazy(func() (v testHandler, err error) {
-					svc, err := ShouldInject[testService](c)
+					svc, err := Inject[testService](c)
 					if err != nil {
 						return testHandler{}, err
 					}
@@ -1309,7 +1309,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[testHandler](c)
+				return Inject[testHandler](c)
 			},
 			validate: func(got any) error {
 				v := got.(testHandler)
@@ -1331,7 +1331,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				c1, c2 := &Container{}, &Container{}
 				c1.Add(Provide("from-c1"))
 				c1.Add(Lazy(func() (v int, err error) {
-					s, err := ShouldInject[string](c2)
+					s, err := Inject[string](c2)
 					if err != nil {
 						return 0, err
 					}
@@ -1339,7 +1339,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				}))
 				c2.Add(Provide("hello"))
 				c2.Add(Lazy(func() (v float64, err error) {
-					i, err := ShouldInject[int](c1)
+					i, err := Inject[int](c1)
 					if err != nil {
 						return 0, err
 					}
@@ -1348,7 +1348,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c2
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[float64](c)
+				return Inject[float64](c)
 			},
 			validate: func(got any) error {
 				v := got.(float64)
@@ -1363,14 +1363,14 @@ func TestComplexDependencyScenarios(t *testing.T) {
 			setup: func() *Container {
 				c := &Container{}
 				c.Add(Lazy(func() (v string, err error) {
-					i, err := ShouldInject[int](c)
+					i, err := Inject[int](c)
 					if err != nil {
 						return "", err
 					}
 					return fmt.Sprintf("got-%d", i), nil
 				}))
 				c.Add(Lazy(func() (v bool, err error) {
-					s, err := ShouldInject[string](c)
+					s, err := Inject[string](c)
 					if err != nil {
 						return false, err
 					}
@@ -1380,7 +1380,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[bool](c)
+				return Inject[bool](c)
 			},
 			validate: func(got any) error {
 				v := got.(bool)
@@ -1398,7 +1398,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 					return 0, fmt.Errorf("intentional error")
 				}))
 				c.Add(Lazy(func() (v string, err error) {
-					_, err = ShouldInject[int](c)
+					_, err = Inject[int](c)
 					if err != nil {
 						return "", fmt.Errorf("wrapped: %w", err)
 					}
@@ -1407,7 +1407,7 @@ func TestComplexDependencyScenarios(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[string](c)
+				return Inject[string](c)
 			},
 			wantErr: true,
 		},
@@ -1447,7 +1447,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				c := &Container{}
 				c.Add(Provide(StringAlias("alias-value")))
 				c.Add(Lazy(func() (v IntAlias, err error) {
-					s, err := ShouldInject[StringAlias](c)
+					s, err := Inject[StringAlias](c)
 					if err != nil {
 						return 0, err
 					}
@@ -1456,7 +1456,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[IntAlias](c)
+				return Inject[IntAlias](c)
 			},
 			validate: func(got any) error {
 				v := got.(IntAlias)
@@ -1475,7 +1475,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[int](c)
+				return Inject[int](c)
 			},
 			validate: func(got any) error {
 				v := got.(int)
@@ -1500,11 +1500,11 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 					return Age(30), nil
 				}))
 				c.Add(Lazy(func() (v Person, err error) {
-					name, err := ShouldInject[Name](c)
+					name, err := Inject[Name](c)
 					if err != nil {
 						return Person{}, err
 					}
-					age, err := ShouldInject[Age](c)
+					age, err := Inject[Age](c)
 					if err != nil {
 						return Person{}, err
 					}
@@ -1513,7 +1513,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[struct {
+				return Inject[struct {
 					Name string
 					Age  int
 				}](c)
@@ -1529,7 +1529,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[[]int](c)
+				return Inject[[]int](c)
 			},
 			wantErr: true,
 		},
@@ -1542,7 +1542,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				}
 				c.Add(Provide(MyStruct{Value: 42}))
 				c.Add(Lazy(func() (v string, err error) {
-					s, err := ShouldInject[MyStruct](c)
+					s, err := Inject[MyStruct](c)
 					if err != nil {
 						return "", err
 					}
@@ -1551,7 +1551,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[string](c)
+				return Inject[string](c)
 			},
 			validate: func(got any) error {
 				v := got.(string)
@@ -1570,7 +1570,7 @@ func TestTypeAliasesAndEquals(t *testing.T) {
 				return c
 			},
 			injectFn: func(c *Container) (any, error) {
-				return ShouldInject[*MyInt](c)
+				return Inject[*MyInt](c)
 			},
 			validate: func(got any) error {
 				v := got.(*MyInt)

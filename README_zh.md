@@ -109,7 +109,7 @@ c.Add(godi.Lazy(func() (*Database, error) {
 }))
 
 // 工厂函数在此处执行
-db, err := godi.ShouldInject[*Database](c)
+db, err := godi.Inject[*Database](c)
 ```
 
 ### 3. 带依赖的懒加载
@@ -121,7 +121,7 @@ c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 c.Add(godi.Lazy(func() (*Database, error) {
     // 在工厂内部注入依赖
-    cfg, err := godi.ShouldInject[Config](c)
+    cfg, err := godi.Inject[Config](c)
     if err != nil {
         return nil, err
     }
@@ -139,24 +139,24 @@ c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
 
 // 第 2 层：Database 依赖 Config
 c.Add(godi.Lazy(func() (*Database, error) {
-    cfg, _ := godi.ShouldInject[Config](c)
+    cfg, _ := godi.Inject[Config](c)
     return NewDatabase(cfg.DSN)
 }))
 
 // 第 3 层：Repository 依赖 Database
 c.Add(godi.Lazy(func() (*UserRepository, error) {
-    db, _ := godi.ShouldInject[*Database](c)
+    db, _ := godi.Inject[*Database](c)
     return NewUserRepository(db)
 }))
 
 // 第 4 层：Service 依赖 Repository
 c.Add(godi.Lazy(func() (*UserService, error) {
-    repo, _ := godi.ShouldInject[*UserRepository](c)
+    repo, _ := godi.Inject[*UserRepository](c)
     return NewUserService(repo)
 }))
 
 // 注入顶层服务（触发整个依赖链）
-svc, err := godi.ShouldInject[*UserService](c)
+svc, err := godi.Inject[*UserService](c)
 ```
 
 ### 5. 循环依赖检测
@@ -168,17 +168,17 @@ type A struct{ B *B }
 type B struct{ A *A }
 
 c.Add(godi.Lazy(func() (A, error) {
-    b, err := godi.ShouldInject[B](c)
+    b, err := godi.Inject[B](c)
     return A{B: b}, err
 }))
 
 c.Add(godi.Lazy(func() (B, error) {
-    a, err := godi.ShouldInject[A](c)
+    a, err := godi.Inject[A](c)
     return B{A: a}, err
 }))
 
 // 返回错误："circular dependency for main.A"
-_, err := godi.ShouldInject[A](c)
+_, err := godi.Inject[A](c)
 ```
 
 ### 6. 多容器注入
@@ -223,7 +223,7 @@ c.Add(godi.Lazy(func() (Database, error) {
 }))
 
 // 注入接口
-db, err := godi.ShouldInject[Database](c)
+db, err := godi.Inject[Database](c)
 ```
 
 ### 9. 测试时使用 Mock
@@ -265,6 +265,47 @@ c.Add(godi.Provide(AppConfig{
 cfg, _ := godi.Inject[AppConfig](c)
 ```
 
+### 11. 生命周期管理和清理
+
+在初始化时注册清理钩子，实现优雅关闭：
+
+```go
+// 创建生命周期管理器
+lifecycle := lifecycle.New("MyApp")
+c.Add(godi.Provide(lifecycle))
+
+// 注册数据库并添加清理钩子
+c.Add(godi.Lazy(func() (*Database, error) {
+    db := NewDatabase(dsn)
+    
+    // 注册清理钩子
+    lifecycle.AddShutdownHook(func(ctx context.Context) error {
+        return db.Close()
+    })
+    
+    return db, nil
+}))
+
+// 注册服务并添加关闭钩子
+c.Add(godi.Lazy(func() (*Service, error) {
+    svc := NewService()
+    
+    // 注册优雅关闭钩子
+    lifecycle.AddShutdownHook(func(ctx context.Context) error {
+        return svc.Shutdown(ctx)
+    })
+    
+    return svc, nil
+}))
+
+// 应用退出时，按反向顺序关闭
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+lifecycle.Shutdown(shutdownCtx)
+```
+
+钩子按反向顺序执行（LIFO - 后进先出），确保正确的清理顺序。
+
 ---
 
 ## API 参考
@@ -281,8 +322,7 @@ cfg, _ := godi.Inject[AppConfig](c)
 
 | 函数 | 签名 | 行为 |
 |------|------|------|
-| `Inject[T](c)` | `(T, bool)` | 找不到返回零值 + false |
-| `ShouldInject[T](c)` | `(T, error)` | 找不到或循环依赖时返回 error |
+| `Inject[T](c)` | `(T, error)` | 找不到或循环依赖时返回 error |
 | `MustInject[T](c)` | `T` | 找不到时 panic |
 | `InjectTo[T](&v, c)` | `error` | 注入到提供的指针 |
 | `MustInjectTo[T](&v, c)` | - | 注入到指针，失败时 panic |
@@ -325,11 +365,11 @@ c.Add(godi.Lazy(func() (*Database, error) {
 
 ```go
 c.Add(godi.Lazy(func() (*UserService, error) {
-    db, err := godi.ShouldInject[*Database](c)
+    db, err := godi.Inject[*Database](c)
     if err != nil {
         return nil, err
     }
-    cache, err := godi.ShouldInject[*Cache](c)
+    cache, err := godi.Inject[*Cache](c)
     if err != nil {
         return nil, err
     }
@@ -358,7 +398,7 @@ r2, _ := godi.Inject[*ExpensiveResource](c)
 
 ```go
 c.Add(godi.Lazy(func() (Database, error) {
-    cfg, _ := godi.ShouldInject[Config](c)
+    cfg, _ := godi.Inject[Config](c)
     
     if cfg.Environment == "test" {
         return NewMockDatabase(), nil
@@ -381,12 +421,12 @@ c.Add(godi.Lazy(func() (Level2, error) {
 }))
 
 c.Add(godi.Lazy(func() (Level3, error) {
-    l2, _ := godi.ShouldInject[Level2](c)
+    l2, _ := godi.Inject[Level2](c)
     return Level3{Value: l2.Value + 1}, nil
 }))
 
 // 注入 Level3 会触发整个链
-l3, err := godi.ShouldInject[Level3](c)
+l3, err := godi.Inject[Level3](c)
 ```
 
 ---
@@ -442,6 +482,7 @@ Godi 支持任何 Go 类型：
 | 07-generics | 泛型类型 |
 | 08-testing-mock | Mock 测试 |
 | 09-web-app | 生产级 Web 应用 |
+| 10-lifecycle-cleanup | 生命周期管理和清理 |
 
 ## 许可证
 

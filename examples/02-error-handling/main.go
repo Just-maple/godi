@@ -6,7 +6,7 @@ import (
 	"github.com/Just-maple/godi"
 )
 
-// Error Handling Example: Using ShouldInject and ShouldAdd
+// Error Handling Example: Using Inject and ShouldAdd
 // Demonstrates graceful error handling without panics
 
 type Database struct {
@@ -34,8 +34,8 @@ func main() {
 		fmt.Printf("Expected error: %v\n", err)
 	}
 
-	// Use ShouldInject to handle injection errors
-	db, err := godi.ShouldInject[Database](c)
+	// Use Inject to handle injection errors
+	db, err := godi.Inject[Database](c)
 	if err != nil {
 		fmt.Printf("Injection failed: %v\n", err)
 		return
@@ -43,7 +43,7 @@ func main() {
 	fmt.Printf("Database: %s\n", db.DSN)
 
 	// Injecting non-existent dependency returns error
-	_, err = godi.ShouldInject[Config](c)
+	_, err = godi.Inject[Config](c)
 	if err != nil {
 		fmt.Printf("Expected error: %v\n", err)
 	}

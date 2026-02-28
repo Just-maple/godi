@@ -7,7 +7,7 @@ import (
 	"github.com/Just-maple/godi"
 )
 
-// 并发安全示例：展示容器的线程安全性
+// Concurrency Example: Demonstrates thread-safe container operations
 
 type Counter struct {
 	Value int
@@ -20,26 +20,26 @@ func main() {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 
-	// 多个 goroutine 同时注入
+	// Multiple goroutines injecting concurrently
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 
-			counter, ok := godi.Inject[Counter](c)
-			if !ok {
-				fmt.Printf("Goroutine %d: 注入失败\n", id)
+			counter, err := godi.Inject[Counter](c)
+			if err != nil {
+				fmt.Printf("Goroutine %d: Injection failed\n", id)
 				return
 			}
 
-			fmt.Printf("Goroutine %d: 注入成功，值=%d\n", id, counter.Value)
+			fmt.Printf("Goroutine %d: Injection successful, value=%d\n", id, counter.Value)
 		}(i)
 	}
 
 	wg.Wait()
-	fmt.Println("所有 goroutine 完成")
+	fmt.Println("All goroutines completed")
 
-	// 演示并发注册
+	// Demonstrate concurrent registration
 	c2 := &godi.Container{}
 	var wg2 sync.WaitGroup
 
@@ -53,10 +53,10 @@ func main() {
 
 	wg2.Wait()
 
-	// 验证所有值都已注册
-	val, ok := godi.Inject[string](c2)
-	if ok {
-		fmt.Printf("注入的值：%s\n", val)
+	// Verify all values are registered
+	val, err := godi.Inject[string](c2)
+	if err == nil {
+		fmt.Printf("Injected value: %s\n", val)
 	}
-	fmt.Println("并发注册演示完成！")
+	fmt.Println("Concurrent registration demo complete!")
 }

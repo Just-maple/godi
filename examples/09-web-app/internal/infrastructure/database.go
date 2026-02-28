@@ -4,6 +4,7 @@ package infrastructure
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Just-maple/godi/examples/09-web-app/pkg/interfaces"
@@ -19,6 +20,7 @@ type DBConnection struct {
 // NewDBConnection creates a new database connection
 // Returns interfaces.Database (abstraction) for dependency inversion
 func NewDBConnection(dsn string) interfaces.Database {
+	fmt.Printf("[Infrastructure] Database connection established: %s\n", dsn)
 	return &DBConnection{
 		dsn:       dsn,
 		connected: time.Now(),
@@ -37,6 +39,7 @@ func (c *DBConnection) Execute(query string, args ...interface{}) (int64, error)
 
 // Close implements interfaces.Database
 func (c *DBConnection) Close() error {
+	fmt.Printf("[Infrastructure] Database connection closed: %s\n", c.dsn)
 	return nil
 }
 
@@ -49,6 +52,7 @@ type CacheClient struct {
 // NewCacheClient creates a new cache client
 // Returns interfaces.Cache (abstraction) for dependency inversion
 func NewCacheClient(addr string) interfaces.Cache {
+	fmt.Printf("[Infrastructure] Cache client connected: %s\n", addr)
 	return &CacheClient{addr: addr}
 }
 
@@ -69,5 +73,11 @@ func (c *CacheClient) Delete(key string) error {
 
 // Initialize implements interfaces.Service
 func (c *CacheClient) Initialize(ctx context.Context) error {
+	return nil
+}
+
+// Close closes the cache connection
+func (c *CacheClient) Close() error {
+	fmt.Printf("[Infrastructure] Cache client disconnected: %s\n", c.addr)
 	return nil
 }

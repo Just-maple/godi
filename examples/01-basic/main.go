@@ -26,13 +26,13 @@ func main() {
 	c.Add(godi.Provide(Config{AppName: "my-app"}))
 
 	// Inject dependencies
-	db, ok := godi.Inject[Database](c)
-	if !ok {
+	db, err := godi.Inject[Database](c)
+	if err != nil {
 		panic("failed to inject Database")
 	}
 
-	cfg, ok := godi.Inject[Config](c)
-	if !ok {
+	cfg, err := godi.Inject[Config](c)
+	if err != nil {
 		panic("failed to inject Config")
 	}
 

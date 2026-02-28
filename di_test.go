@@ -892,3 +892,45 @@ func ExampleMultiContainer() {
 	fmt.Printf("DB: %s, App: %s\n", db.DSN, cfg.AppName)
 	// Output: DB: mysql://localhost, App: multi-app
 }
+
+func TestInvoke(t *testing.T) {
+	c := &Container{}
+
+	type Config struct {
+		String string
+		Float  float64
+		Int    int
+	}
+
+	c.Add(Lazy(func() (v float64, err error) {
+		r, err := ShouldInject[int](c)
+		if err != nil {
+			return
+		}
+		return float64(r), nil
+	}))
+
+	c.MustAdd(Lazy(func() (v string, err error) {
+		return "test", nil
+	}))
+
+	c.Add(Lazy(func() (v int, err error) {
+		return 5, nil
+	}))
+
+	c.Add(Lazy(func() (v Config, err error) {
+		if err = ShouldInjectTo(&v.Float, c); err != nil {
+			return
+		}
+		if err = ShouldInjectTo(&v.String, c); err != nil {
+			return
+		}
+		if err = ShouldInjectTo(&v.Int, c); err != nil {
+			return
+		}
+		return
+	}))
+
+	v, err := ShouldInject[Config](c)
+	t.Log(v, err)
+}

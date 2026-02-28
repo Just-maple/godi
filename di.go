@@ -58,11 +58,20 @@ func (containers *Container) Add(p Provider) (success bool) {
 	return true
 }
 
-func injectTo[T any](v *T, container *Container) (ok bool) {
-	container.mu.Lock()
-	defer container.mu.Unlock()
-	for _, exist := range container.providers {
-		if ok = exist.Inject(v); ok {
+func withLock[T any](mutex *sync.Mutex, fn func() T) T {
+	mutex.Lock()
+	defer mutex.Unlock()
+	return fn()
+}
+
+func injectTo[T any](v *T, c *Container) (ok bool) {
+	for i := 0; withLock(&c.mu, func() bool { return i < len(c.providers) }); i++ {
+		p := withLock(&c.mu, func() Provider { return c.providers[i] })
+		lazy, is := p.(*lazyProvider)
+		if is && lazy.instance == (*firing)(nil) {
+			continue
+		}
+		if ok = p.Inject(v); ok || (is && lazy.err != nil) {
 			return
 		}
 	}
@@ -111,4 +120,30 @@ func MustInject[T any](containers ...*Container) (v T) {
 		panic(e)
 	}
 	return
+}
+
+func Lazy[T any](factory func() (v T, err error)) Provider {
+	l := &lazyProvider{}
+	l.Provider = provider[T](func(ptr any) bool {
+		l.once.Do(func() {
+			l.instance = (*firing)(nil)
+			l.instance, l.err = factory()
+		})
+		prt, _ := ptr.(*T)
+		if l.err != nil || prt == nil {
+			return false
+		}
+		*prt = l.instance.(T)
+		return true
+	})
+	return l
+}
+
+type firing struct{}
+
+type lazyProvider struct {
+	Provider
+	once     sync.Once
+	instance interface{}
+	err      error
 }

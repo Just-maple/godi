@@ -1,21 +1,29 @@
-# Godi - Go 的简单依赖注入容器
+# Godi
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Just-maple/godi.svg)](https://pkg.go.dev/github.com/Just-maple/godi)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Just-maple/godi)](https://goreportcard.com/report/github.com/Just-maple/godi)
 
-一个轻量级、类型安全的 Go 依赖注入容器。
+## 概述
 
-## 特性
+Godi 是一个使用 Go 泛型的依赖注入容器。
 
-- **类型安全**: 利用 Go 泛型实现编译时类型检查
-- **零反射**: 无反射开销，所有类型解析在编译时完成
-- **简单 API**: 最小化、直观的依赖管理接口
-- **线程安全**: 内置互斥锁保护并发访问
-- **零依赖**: 纯 Go 实现，无外部依赖
-- **灵活**: 支持任何类型，包括结构体、基本类型、切片和映射
-- **多容器**: 支持跨多个容器注入
-- **循环依赖检测**: 自动检测循环依赖
-- **懒加载**: 使用 `Lazy` 提供者延迟初始化
+## 生态系统背景
+
+Go 依赖注入领域有几种不同的方案：
+
+| 项目 | 方案 | 主要特点 |
+|------|------|---------|
+| **dig/fx** (Uber) | 反射 | 运行时依赖解析 |
+| **wire** (Google) | 代码生成 | 编译时依赖解析 |
+| **samber/do** | 泛型 + 反射 | 函数式容器 API |
+| **godi** | 泛型 | 直接基于类型的注入 |
+
+各方案有不同的取舍：
+
+- **基于反射** (dig): 灵活，无需设置，可能出现运行时错误
+- **代码生成** (wire): 类型安全，需要构建步骤，设置较复杂
+- **基于泛型** (godi, samber/do): 类型安全，无需代码生成，运行时解析
+
+Godi 专注于使用 Go 泛型的最小化 API，提供自动循环依赖检测和多容器支持。
 
 ## 安装
 
@@ -23,135 +31,173 @@
 go get github.com/Just-maple/godi
 ```
 
-## 快速开始
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
-
-type Database struct {
-    DSN string
-}
-
-type Config struct {
-    AppName string
-}
-
-func main() {
-    // 创建容器
-    c := &godi.Container{}
-    
-    // 注册依赖
-    c.Add(godi.Provide(Database{DSN: "mysql://localhost:3306/mydb"}))
-    c.Add(godi.Provide(Config{AppName: "my-app"}))
-    
-    // 注入依赖
-    db, ok := godi.Inject[Database](c)
-    if !ok {
-        panic("failed to inject Database")
-    }
-    
-    cfg, ok := godi.Inject[Config](c)
-    if !ok {
-        panic("failed to inject Config")
-    }
-    
-    fmt.Printf("Connected to %s for %s\n", db.DSN, cfg.AppName)
-}
-```
-
-## API 参考
+## 核心概念
 
 ### 容器 (Container)
 
-#### `Add(provider Provider) bool`
-
-在容器中注册提供者。如果相同类型的提供者已存在，返回 `false`。
+`Container` 保存已注册的提供者并管理依赖注入。
 
 ```go
 c := &godi.Container{}
-success := c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
-```
-
-#### `ShouldAdd(provider Provider) error`
-
-注册提供者，如果相同类型的提供者已存在则返回错误。
-
-```go
-err := c.ShouldAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
-if err != nil {
-    // 处理重复提供者错误
-}
-```
-
-#### `MustAdd(provider Provider)`
-
-注册提供者，如果相同类型的提供者已存在则触发 panic。
-
-```go
-c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 ```
 
 ### 提供者注册
 
-#### `Provide[T any](t T) Provider`
-
-为给定类型创建提供者。
+**Provide** - 注册具体值：
 
 ```go
-db := Database{DSN: "mysql://localhost"}
-provider := godi.Provide(db)
+c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
 ```
 
-#### `Lazy[T any](factory func() (T, error)) Provider`
-
-创建懒加载提供者。工厂函数仅在首次请求依赖时调用。
+**Lazy** - 注册工厂函数，在首次请求时执行：
 
 ```go
 c.Add(godi.Lazy(func() (*Database, error) {
-    return ConnectDB("mysql://localhost")
+    return sql.Open("mysql", dsn)
 }))
 ```
 
-### 依赖注入
-
-#### `Inject[T any](c ...*Container) (v T, ok bool)`
-
-从容器中检索依赖。如果未找到，返回零值和 `false`。支持多容器。
+### 获取依赖
 
 ```go
+// 返回 (值，ok)
 db, ok := godi.Inject[Database](c)
-if !ok {
-    // 处理缺失依赖
-}
-```
 
-#### `ShouldInject[T any](c ...*Container) (v T, err error)`
-
-检索依赖，如果未找到则返回错误。包含循环依赖检测。
-
-```go
+// 返回 (值，error)
 db, err := godi.ShouldInject[Database](c)
-if err != nil {
-    // 处理错误（包含循环依赖检测）
-}
-```
 
-#### `MustInject[T any](c ...*Container) (v T)`
-
-检索依赖，如果未找到则触发 panic。
-
-```go
+// 找不到则 panic
 db := godi.MustInject[Database](c)
 ```
 
-#### `InjectTo[T any](v *T, c ...*Container) error`
+---
 
-直接将依赖注入到提供的指针中。如果未找到或检测到循环依赖则返回错误。支持多容器。
+## 使用场景
+
+### 1. 基础注入
+
+注册和检索简单依赖：
+
+```go
+package main
+
+import "github.com/Just-maple/godi"
+
+type Config struct {
+    DSN string
+}
+
+func main() {
+    c := &godi.Container{}
+    c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
+    
+    cfg, ok := godi.Inject[Config](c)
+    if !ok {
+        panic("Config not found")
+    }
+}
+```
+
+### 2. 懒加载
+
+延迟昂贵资源的初始化直到首次使用：
+
+```go
+c.Add(godi.Lazy(func() (*Database, error) {
+    // 此代码仅在首次请求 Database 时执行
+    return sql.Open("mysql", dsn)
+}))
+
+// 工厂函数在此处执行
+db, err := godi.ShouldInject[*Database](c)
+```
+
+### 3. 带依赖的懒加载
+
+懒加载工厂可以注入自己的依赖：
+
+```go
+c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
+
+c.Add(godi.Lazy(func() (*Database, error) {
+    // 在工厂内部注入依赖
+    cfg, err := godi.ShouldInject[Config](c)
+    if err != nil {
+        return nil, err
+    }
+    return sql.Open("mysql", cfg.DSN)
+}))
+```
+
+### 4. 依赖链
+
+构建依赖链：
+
+```go
+// 第 1 层：Config
+c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
+
+// 第 2 层：Database 依赖 Config
+c.Add(godi.Lazy(func() (*Database, error) {
+    cfg, _ := godi.ShouldInject[Config](c)
+    return NewDatabase(cfg.DSN)
+}))
+
+// 第 3 层：Repository 依赖 Database
+c.Add(godi.Lazy(func() (*UserRepository, error) {
+    db, _ := godi.ShouldInject[*Database](c)
+    return NewUserRepository(db)
+}))
+
+// 第 4 层：Service 依赖 Repository
+c.Add(godi.Lazy(func() (*UserService, error) {
+    repo, _ := godi.ShouldInject[*UserRepository](c)
+    return NewUserService(repo)
+}))
+
+// 注入顶层服务（触发整个依赖链）
+svc, err := godi.ShouldInject[*UserService](c)
+```
+
+### 5. 循环依赖检测
+
+循环依赖在运行时检测：
+
+```go
+type A struct{ B *B }
+type B struct{ A *A }
+
+c.Add(godi.Lazy(func() (A, error) {
+    b, err := godi.ShouldInject[B](c)
+    return A{B: b}, err
+}))
+
+c.Add(godi.Lazy(func() (B, error) {
+    a, err := godi.ShouldInject[A](c)
+    return B{A: a}, err
+}))
+
+// 返回错误："circular dependency for main.A"
+_, err := godi.ShouldInject[A](c)
+```
+
+### 6. 多容器注入
+
+从多个容器注入：
+
+```go
+dbContainer := &godi.Container{}
+cacheContainer := &godi.Container{}
+
+dbContainer.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
+cacheContainer.Add(godi.Provide(Cache{Host: "redis://localhost"}))
+
+// 搜索两个容器
+db, _ := godi.Inject[Database](dbContainer, cacheContainer)
+cache, _ := godi.Inject[Cache](dbContainer, cacheContainer)
+```
+
+### 7. InjectTo - 注入到现有变量
 
 ```go
 var db Database
@@ -161,289 +207,242 @@ if err != nil {
 }
 ```
 
-#### `MustInjectTo[T any](v *T, c ...*Container)`
+### 8. 基于接口的注入
 
-直接将依赖注入到提供的指针中，如果未找到则触发 panic。
+注册和注入接口：
 
 ```go
-var db Database
-godi.MustInjectTo(&db, c)
+// 定义接口
+type Database interface {
+    Query(string) ([]Row, error)
+}
+
+// 注册实现
+c.Add(godi.Lazy(func() (Database, error) {
+    return NewMySQLDatabase(dsn)
+}))
+
+// 注入接口
+db, err := godi.ShouldInject[Database](c)
 ```
 
-## 示例
+### 9. 测试时使用 Mock
 
-### 懒加载
+测试时替换实现：
 
 ```go
-package main
+// 生产环境
+prod := &godi.Container{}
+prod.Add(godi.Lazy(func() (Database, error) {
+    return NewMySQLDatabase(prodDSN)
+}))
 
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
+// 测试环境
+test := &godi.Container{}
+test.Add(godi.Provide(&MockDatabase{Data: testdata}))
 
-type Database struct {
-    DSN string
-}
-
-func main() {
-    c := &godi.Container{}
-    
-    // 懒加载 - 工厂函数在首次使用时调用
-    c.Add(godi.Lazy(func() (Database, error) {
-        fmt.Println("Initializing database connection...")
-        return Database{DSN: "mysql://localhost"}, nil
-    }))
-    
-    // 工厂函数在此处调用
-    db, _ := godi.Inject[Database](c)
-    fmt.Printf("Connected: %s\n", db.DSN)
-    
-    // 后续调用使用缓存值
-    db2, _ := godi.Inject[Database](c)
-    fmt.Printf("Cached: %s\n", db2.DSN)
-}
+// 相同的服务可用于两种环境
+svc := NewUserService(db)
 ```
 
-### 循环依赖检测
+### 10. 分组相关依赖
+
+使用结构体分组配置：
 
 ```go
-package main
-
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
-
-type A struct {
-    B *B
+type AppConfig struct {
+    Database DatabaseConfig
+    HTTP     HTTPConfig
+    Cache    CacheConfig
 }
 
-type B struct {
-    A *A
-}
+c.Add(godi.Provide(AppConfig{
+    Database: DatabaseConfig{DSN: "mysql://localhost"},
+    HTTP:     HTTPConfig{Port: 8080},
+    Cache:    CacheConfig{Host: "redis://localhost"},
+}))
 
-func main() {
-    c := &godi.Container{}
-    
-    // 循环依赖：A 需要 B，B 需要 A
-    c.Add(godi.Lazy(func() (A, error) {
-        b, err := godi.ShouldInject[B](c)
-        return A{B: b}, err
-    }))
-    
-    c.Add(godi.Lazy(func() (B, error) {
-        a, err := godi.ShouldInject[A](c)
-        return B{A: a}, err
-    }))
-    
-    // 检测循环依赖
-    _, err := godi.ShouldInject[A](c)
+cfg, _ := godi.Inject[AppConfig](c)
+```
+
+---
+
+## API 参考
+
+### 容器方法
+
+| 方法 | 描述 |
+|------|------|
+| `Add(p Provider) bool` | 注册提供者。重复时返回 false |
+| `ShouldAdd(p Provider) error` | 注册提供者。重复时返回 error |
+| `MustAdd(p Provider)` | 注册提供者。重复时 panic |
+
+### 注入函数
+
+| 函数 | 签名 | 行为 |
+|------|------|------|
+| `Inject[T](c)` | `(T, bool)` | 找不到返回零值 + false |
+| `ShouldInject[T](c)` | `(T, error)` | 找不到或循环依赖时返回 error |
+| `MustInject[T](c)` | `T` | 找不到时 panic |
+| `InjectTo[T](&v, c)` | `error` | 注入到提供的指针 |
+| `MustInjectTo[T](&v, c)` | - | 注入到指针，失败时 panic |
+
+### 提供者函数
+
+| 函数 | 描述 |
+|------|------|
+| `Provide[T](v T)` | 注册具体值 |
+| `Lazy[T](func() (T, error))` | 注册工厂函数，延迟执行 |
+
+---
+
+## Lazy 懒加载模式
+
+### 模式 1: 简单懒加载
+
+```go
+c.Add(godi.Lazy(func() (*Database, error) {
+    return sql.Open("mysql", dsn)
+}))
+```
+
+### 模式 2: 懒加载带错误处理
+
+```go
+c.Add(godi.Lazy(func() (*Database, error) {
+    db, err := sql.Open("mysql", dsn)
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
-        // 输出：Error: circular dependency for *main.A
+        return nil, err
     }
-}
+    if err := db.Ping(); err != nil {
+        return nil, err
+    }
+    return db, nil
+}))
 ```
 
-### 多容器注入
+### 模式 3: 懒加载带依赖
 
 ```go
-package main
-
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
-
-type Database struct {
-    DSN string
-}
-
-type Cache struct {
-    Host string
-}
-
-func main() {
-    // 创建多个容器
-    dbContainer := &godi.Container{}
-    cacheContainer := &godi.Container{}
-    
-    // 在不同容器中注册
-    dbContainer.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
-    cacheContainer.Add(godi.Provide(Cache{Host: "redis://localhost"}))
-    
-    // 从多个容器注入
-    db, _ := godi.Inject[Database](dbContainer, cacheContainer)
-    cache, _ := godi.Inject[Cache](dbContainer, cacheContainer)
-    
-    fmt.Printf("DB: %s, Cache: %s\n", db.DSN, cache.Host)
-}
-```
-
-### 使用 ShouldInject 处理错误
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
-
-type Config struct {
-    Port int
-}
-
-func main() {
-    c := &godi.Container{}
-    c.Add(godi.Provide(Config{Port: 8080}))
-    
-    // 优雅的错误处理
-    config, err := godi.ShouldInject[Config](c)
+c.Add(godi.Lazy(func() (*UserService, error) {
+    db, err := godi.ShouldInject[*Database](c)
     if err != nil {
-        panic(err)
+        return nil, err
     }
-    
-    fmt.Printf("Server starting on port %d\n", config.Port)
-}
+    cache, err := godi.ShouldInject[*Cache](c)
+    if err != nil {
+        return nil, err
+    }
+    return NewUserService(db, cache)
+}))
 ```
 
-### 复杂依赖图
+### 模式 4: 懒加载单例
+
+懒加载提供者是单例 - 工厂函数只执行一次：
 
 ```go
-package main
+c.Add(godi.Lazy(func() (*ExpensiveResource, error) {
+    fmt.Println("Initializing...") // 仅打印一次
+    return NewExpensiveResource()
+}))
 
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
+// 工厂函数在此处执行
+r1, _ := godi.Inject[*ExpensiveResource](c)
 
-type Config struct {
-    DSN string
-}
-
-type Database struct {
-    DSN string
-}
-
-type Repository struct {
-    DB Database
-}
-
-type Service struct {
-    Repo Repository
-}
-
-func main() {
-    c := &godi.Container{}
-    
-    // 注册配置
-    c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
-    
-    // 带依赖的懒加载
-    c.Add(godi.Lazy(func() (Database, error) {
-        cfg, err := godi.ShouldInject[Config](c)
-        if err != nil {
-            return Database{}, err
-        }
-        return Database{DSN: cfg.DSN}, nil
-    }))
-    
-    c.Add(godi.Lazy(func() (Repository, error) {
-        db, err := godi.ShouldInject[Database](c)
-        if err != nil {
-            return Repository{}, err
-        }
-        return Repository{DB: db}, nil
-    }))
-    
-    c.Add(godi.Lazy(func() (Service, error) {
-        repo, err := godi.ShouldInject[Repository](c)
-        if err != nil {
-            return Service{}, err
-        }
-        return Service{Repo: repo}, nil
-    }))
-    
-    // 注入顶层服务
-    svc, err := godi.ShouldInject[Service](c)
-    if err != nil {
-        panic(err)
-    }
-    
-    fmt.Printf("Service ready: DB=%s\n", svc.Repo.DB.DSN)
-}
+// 返回缓存值
+r2, _ := godi.Inject[*ExpensiveResource](c)
 ```
 
-## 支持的类型
+### 模式 5: 条件懒加载
 
-Godi 支持注入任何 Go 类型：
+```go
+c.Add(godi.Lazy(func() (Database, error) {
+    cfg, _ := godi.ShouldInject[Config](c)
+    
+    if cfg.Environment == "test" {
+        return NewMockDatabase(), nil
+    }
+    return NewMySQLDatabase(cfg.DSN)
+}))
+```
 
-- **结构体**: `Database`, `Config`, 自定义类型
-- **基本类型**: `string`, `int`, `bool`, `float64`
-- **指针**: `*Database`, `*Config`
-- **切片**: `[]string`, `[]int`
-- **映射**: `map[string]int`, `map[string]any`
-- **接口**: `any`, 自定义接口
-- **数组**: `[3]int`, `[5]string`
-- **通道**: `chan int`, `chan string`
-- **函数**: `func()`, `func(int) string`
+### 模式 6: 多层依赖链
+
+```go
+// 5 层依赖链
+c.Add(godi.Lazy(func() (Level1, error) {
+    return Level1{Value: 1}, nil
+}))
+
+c.Add(godi.Lazy(func() (Level2, error) {
+    l1, _ := godi.ShouldInject[Level1](c)
+    return Level2{Value: l1.Value + 1}, nil
+}))
+
+c.Add(godi.Lazy(func() (Level3, error) {
+    l2, _ := godi.ShouldInject[Level2](c)
+    return Level3{Value: l2.Value + 1}, nil
+}))
+
+// 注入 Level3 会触发整个链
+l3, err := godi.ShouldInject[Level3](c)
+```
+
+---
 
 ## 线程安全
 
-所有容器操作都由互斥锁保护，可安全并发使用：
+所有容器操作都是线程安全的：
 
 ```go
 c := &godi.Container{}
 c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
 
-// 可安全地从多个 goroutine 使用
+// 并发使用安全
 go func() {
     db, _ := godi.Inject[Database](c)
-    // 使用 db...
 }()
 
 go func() {
     db, _ := godi.Inject[Database](c)
-    // 使用 db...
 }()
 ```
 
-## 最佳实践
+---
 
-1. **尽早注册依赖**: 在应用启动时设置容器
-2. **使用 ShouldInject 处理错误**: 想要优雅处理错误时，优先使用 `ShouldInject` 而非 `MustInject`
-3. **对昂贵资源使用 Lazy**: 数据库连接、HTTP 客户端等
-4. **避免循环依赖**: 仔细设计依赖图
-5. **使用多容器实现模块化**: 使用不同容器分离不同模块的关注点
-6. **依赖接口**: 跨层依赖使用接口（参见 examples/09-web-app）
+## 支持的类型
 
-## 示例目录
+Godi 支持任何 Go 类型：
+
+- 结构体：`Database`, `Config`
+- 基本类型：`string`, `int`, `bool`
+- 指针：`*Database`
+- 切片：`[]string`
+- 映射：`map[string]int`
+- 接口：`any`, 自定义接口
+- 数组：`[3]int`
+- 通道：`chan int`
+- 函数：`func() error`
+
+---
+
+## 示例
+
+完整示例见 [examples/](examples/)：
 
 | 示例 | 描述 |
 |------|------|
-| [01-basic](examples/01-basic/) | 基础依赖注入 |
-| [02-error-handling](examples/02-error-handling/) | 错误处理模式 |
-| [03-must-inject](examples/03-must-inject/) | 错误时 panic 的注入 |
-| [04-all-types](examples/04-all-types/) | 所有支持的类型 |
-| [05-multi-container](examples/05-multi-container/) | 多容器 |
-| [06-concurrent](examples/06-concurrent/) | 并发访问 |
-| [07-generics](examples/07-generics/) | 泛型类型注入 |
-| [08-testing-mock](examples/08-testing-mock/) | 使用 Mock 测试 |
-| [09-web-app](examples/09-web-app/) | 生产级 Web 应用 (SOLID 原则) |
-
-## 对比
-
-| 特性 | Godi | dig/fx | wire |
-|------|------|--------|------|
-| **类型解析** | 泛型 | 反射 | 代码生成 |
-| **错误检测** | 编译时 | 运行时 | 编译时 |
-| **性能** | 零开销 | 反射开销 | 零开销 |
-| **设置** | 无需设置 | 无需设置 | 代码生成 |
-| **多容器** | ✅ 内置 | ❌ 单一 | ❌ 单一 |
-| **循环检测** | ✅ 运行时 | ✅ 运行时 | ✅ 编译时 |
+| 01-basic | 基础注入 |
+| 02-error-handling | 错误处理 |
+| 03-must-inject | 错误时 panic |
+| 04-all-types | 所有支持的类型 |
+| 05-multi-container | 多容器 |
+| 06-concurrent | 并发访问 |
+| 07-generics | 泛型类型 |
+| 08-testing-mock | Mock 测试 |
+| 09-web-app | 生产级 Web 应用 |
 
 ## 许可证
 
-MIT License - 详见 LICENSE 文件
+MIT License

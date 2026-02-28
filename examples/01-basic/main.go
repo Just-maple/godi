@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/Just-maple/godi"
 )
 
-// 基础示例：注册和注入简单依赖
+// Basic Example: Registering and injecting simple dependencies
+// Demonstrates the core functionality of godi
 
 type Database struct {
 	DSN string
@@ -16,14 +18,14 @@ type Config struct {
 }
 
 func main() {
-	// 创建容器
+	// Create container
 	c := &godi.Container{}
 
-	// 注册依赖
+	// Register dependencies
 	c.Add(godi.Provide(Database{DSN: "mysql://localhost:3306/mydb"}))
 	c.Add(godi.Provide(Config{AppName: "my-app"}))
 
-	// 注入依赖
+	// Inject dependencies
 	db, ok := godi.Inject[Database](c)
 	if !ok {
 		panic("failed to inject Database")
@@ -35,4 +37,5 @@ func main() {
 	}
 
 	fmt.Printf("Connected to %s for %s\n", db.DSN, cfg.AppName)
+	// Output: Connected to mysql://localhost:3306/mydb for my-app
 }

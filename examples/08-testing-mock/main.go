@@ -6,7 +6,8 @@ import (
 	"github.com/Just-maple/godi"
 )
 
-// 测试和 Mock 示例：展示如何在测试中使用依赖注入
+// Testing and Mock Example: Using dependency injection for testable code
+// Demonstrates how to use interfaces and mocks for testing
 
 type Database interface {
 	Query(sql string) ([]map[string]interface{}, error)
@@ -17,7 +18,7 @@ type RealDatabase struct {
 }
 
 func (d *RealDatabase) Query(sql string) ([]map[string]interface{}, error) {
-	// 实际数据库查询
+	// Actual database query
 	return nil, nil
 }
 
@@ -45,31 +46,31 @@ func (s *UserService) GetUser(id int) (map[string]interface{}, error) {
 }
 
 func main() {
-	// 生产环境配置
+	// Production configuration
 	prodContainer := &godi.Container{}
 	prodContainer.Add(godi.Provide(&RealDatabase{DSN: "mysql://localhost/prod"}))
 	prodContainer.Add(godi.Provide(&UserService{DB: &RealDatabase{DSN: "mysql://localhost/prod"}}))
 
-	// 测试环境配置（使用 Mock）
+	// Test configuration (using Mock)
 	testContainer := &godi.Container{}
 	mockDB := &MockDatabase{
 		Data: []map[string]interface{}{
-			{"id": 1, "name": "测试用户", "email": "test@example.com"},
+			{"id": 1, "name": "Test User", "email": "test@example.com"},
 		},
 	}
 	testContainer.Add(godi.Provide(mockDB))
 	testContainer.Add(godi.Provide(&UserService{DB: mockDB}))
 
-	// 使用测试容器
+	// Use test container
 	testUserSvc, _ := godi.Inject[*UserService](testContainer)
 	user, _ := testUserSvc.GetUser(1)
-	fmt.Printf("测试用户：%v\n", user)
+	fmt.Printf("Test user: %v\n", user)
 
-	// 使用生产容器
+	// Use production container
 	prodUserSvc, _ := godi.Inject[*UserService](prodContainer)
-	fmt.Printf("生产服务就绪：%v\n", prodUserSvc != nil)
+	fmt.Printf("Production service ready: %v\n", prodUserSvc != nil)
 
-	fmt.Println("\n演示完成！")
-	fmt.Println("- 测试环境使用 MockDatabase")
-	fmt.Println("- 生产环境使用 RealDatabase")
+	fmt.Println("\nDemo complete!")
+	fmt.Println("- Test environment uses MockDatabase")
+	fmt.Println("- Production environment uses RealDatabase")
 }

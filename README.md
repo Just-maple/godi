@@ -14,42 +14,13 @@ A lightweight, type-safe dependency injection container for Go applications.
 - **Zero dependencies**: Pure Go implementation with no external dependencies
 - **Flexible**: Supports any type including structs, primitives, slices, and maps
 - **Multi-container**: Support injection across multiple containers
+- **Circular dependency detection**: Automatic detection of circular dependencies
+- **Lazy loading**: Deferred initialization with `Lazy` provider
 
 ## Installation
 
 ```bash
 go get github.com/Just-maple/godi
-```
-
-## Comparison
-
-### Godi vs Other DI Containers
-
-| Feature | Godi | dig/fx | wire | Facebook Inject | samber/do |
-|---------|------|--------|------|-----------------|-----------|
-| **Type Resolution** | Generics | Reflection | Code Gen | Reflection | Generics + Reflection |
-| **Error Detection** | Compile-time | Runtime | Compile-time | Runtime | Runtime |
-| **Performance** | Zero overhead | Reflection cost | Zero overhead | Reflection cost | Reflection cost |
-| **Binary Size** | Minimal | Larger | Minimal | Larger | Larger |
-| **IDE Support** | Full autocomplete | Limited | Generated code | Limited | Limited |
-| **Setup** | No setup | No setup | Code generation | No setup | No setup |
-| **Learning Curve** | Low | Medium | High | Medium | Low |
-| **Multi-container** | Built-in | Single | Single | Single | Supported |
-| **Dependencies** | Zero | dig | wire | None | None |
-| **Go Version** | 1.18+ | Any | Any | Any | 1.21+ |
-
-### Why Zero Reflection Matters
-
-```go
-// Reflection-based (dig/fx) - Runtime error possible
-container.Invoke(func(service Service) {})
-// ❌ Error only at runtime if Service not registered
-
-// Godi - Compile-time safety
-db, ok := godi.Inject[Database](c)
-// ✅ Error at compile time if type mismatch
-// ✅ IDE autocomplete works
-// ✅ No reflection overhead
 ```
 
 ## Quick Start
@@ -79,8 +50,15 @@ func main() {
     c.Add(godi.Provide(Config{AppName: "my-app"}))
     
     // Inject dependencies
-    db, _ := godi.Inject[Database](c)
-    cfg, _ := godi.Inject[Config](c)
+    db, ok := godi.Inject[Database](c)
+    if !ok {
+        panic("failed to inject Database")
+    }
+    
+    cfg, ok := godi.Inject[Config](c)
+    if !ok {
+        panic("failed to inject Config")
+    }
     
     fmt.Printf("Connected to %s for %s\n", db.DSN, cfg.AppName)
 }
@@ -89,8 +67,6 @@ func main() {
 ## API Reference
 
 ### Container
-
-The `Container` type holds all registered providers and manages dependency injection.
 
 #### `Add(provider Provider) bool`
 
@@ -106,7 +82,6 @@ success := c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
 Registers a provider and returns an error if a provider of the same type already exists.
 
 ```go
-c := &godi.Container{}
 err := c.ShouldAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 if err != nil {
     // Handle duplicate provider error
@@ -118,7 +93,6 @@ if err != nil {
 Registers a provider and panics if a provider of the same type already exists.
 
 ```go
-c := &godi.Container{}
 c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 ```
 
@@ -133,9 +107,19 @@ db := Database{DSN: "mysql://localhost"}
 provider := godi.Provide(db)
 ```
 
+#### `Lazy[T any](factory func() (T, error)) Provider`
+
+Creates a lazy-loaded provider. The factory function is called only when the dependency is first requested.
+
+```go
+c.Add(godi.Lazy(func() (*Database, error) {
+    return ConnectDB("mysql://localhost")
+}))
+```
+
 ### Dependency Injection
 
-#### `Inject[T any](containers ...*Container) (v T, ok bool)`
+#### `Inject[T any](c ...*Container) (v T, ok bool)`
 
 Retrieves a dependency from the container(s). Returns the zero value and `false` if not found. Supports multiple containers.
 
@@ -146,18 +130,18 @@ if !ok {
 }
 ```
 
-#### `ShouldInject[T any](containers ...*Container) (v T, err error)`
+#### `ShouldInject[T any](c ...*Container) (v T, err error)`
 
-Retrieves a dependency and returns an error if not found.
+Retrieves a dependency and returns an error if not found. Includes circular dependency detection.
 
 ```go
 db, err := godi.ShouldInject[Database](c)
 if err != nil {
-    // Handle error
+    // Handle error (includes circular dependency detection)
 }
 ```
 
-#### `MustInject[T any](containers ...*Container) (v T)`
+#### `MustInject[T any](c ...*Container) (v T)`
 
 Retrieves a dependency and panics if not found.
 
@@ -165,27 +149,21 @@ Retrieves a dependency and panics if not found.
 db := godi.MustInject[Database](c)
 ```
 
-#### `InjectTo[T any](v *T, containers ...*Container) (ok bool)`
+#### `InjectTo[T any](v *T, c ...*Container) error`
 
-Injects a dependency directly into a provided pointer. Supports multiple containers.
-
-```go
-var db Database
-ok := godi.InjectTo(&db, c)
-```
-
-#### `ShouldInjectTo[T any](v *T, containers ...*Container) error`
-
-Injects a dependency and returns an error if not found.
+Injects a dependency directly into a provided pointer. Returns error if not found or circular dependency detected. Supports multiple containers.
 
 ```go
 var db Database
-err := godi.ShouldInjectTo(&db, c)
+err := godi.InjectTo(&db, c)
+if err != nil {
+    // Handle error
+}
 ```
 
-#### `MustInjectTo[T any](v *T, containers ...*Container)`
+#### `MustInjectTo[T any](v *T, c ...*Container)`
 
-Injects a dependency and panics if not found.
+Injects a dependency directly into a provided pointer and panics if not found.
 
 ```go
 var db Database
@@ -194,7 +172,7 @@ godi.MustInjectTo(&db, c)
 
 ## Examples
 
-### Basic Usage
+### Lazy Loading
 
 ```go
 package main
@@ -208,36 +186,26 @@ type Database struct {
     DSN string
 }
 
-type Logger struct {
-    Level string
-}
-
-type Service struct {
-    DB     Database
-    Logger Logger
-}
-
 func main() {
     c := &godi.Container{}
     
-    // Register dependencies
-    c.Add(godi.Provide(Database{DSN: "postgres://localhost/mydb"}))
-    c.Add(godi.Provide(Logger{Level: "info"}))
+    // Lazy loading - factory called on first use
+    c.Add(godi.Lazy(func() (Database, error) {
+        fmt.Println("Initializing database connection...")
+        return Database{DSN: "mysql://localhost"}, nil
+    }))
     
-    // Inject into struct
+    // Factory is called here
     db, _ := godi.Inject[Database](c)
-    logger, _ := godi.Inject[Logger](c)
+    fmt.Printf("Connected: %s\n", db.DSN)
     
-    service := Service{
-        DB:     db,
-        Logger: logger,
-    }
-    
-    fmt.Printf("Service ready: %v\n", service)
+    // Subsequent calls use cached value
+    db2, _ := godi.Inject[Database](c)
+    fmt.Printf("Cached: %s\n", db2.DSN)
 }
 ```
 
-### Using ShouldInject for Error Handling
+### Circular Dependency Detection
 
 ```go
 package main
@@ -247,50 +215,34 @@ import (
     "github.com/Just-maple/godi"
 )
 
-type Config struct {
-    Port int
+type A struct {
+    B *B
+}
+
+type B struct {
+    A *A
 }
 
 func main() {
     c := &godi.Container{}
-    c.Add(godi.Provide(Config{Port: 8080}))
     
-    // Use ShouldInject for proper error handling
-    config, err := godi.ShouldInject[Config](c)
+    // Circular dependency: A needs B, B needs A
+    c.Add(godi.Lazy(func() (A, error) {
+        b, err := godi.ShouldInject[B](c)
+        return A{B: b}, err
+    }))
+    
+    c.Add(godi.Lazy(func() (B, error) {
+        a, err := godi.ShouldInject[A](c)
+        return B{A: a}, err
+    }))
+    
+    // Detects circular dependency
+    _, err := godi.ShouldInject[A](c)
     if err != nil {
-        panic(err)
+        fmt.Printf("Error: %v\n", err)
+        // Output: Error: circular dependency for *main.A
     }
-    
-    fmt.Printf("Server starting on port %d\n", config.Port)
-}
-```
-
-### Working with Different Types
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/Just-maple/godi"
-)
-
-func main() {
-    c := &godi.Container{}
-    
-    // Register various types
-    c.Add(godi.Provide("application-name"))
-    c.Add(godi.Provide(42))
-    c.Add(godi.Provide(3.14))
-    c.Add(godi.Provide(true))
-    c.Add(godi.Provide([]string{"a", "b", "c"}))
-    c.Add(godi.Provide(map[string]int{"x": 1}))
-    
-    str, _ := godi.Inject[string](c)
-    num, _ := godi.Inject[int](c)
-    slice, _ := godi.Inject[[]string](c)
-    
-    fmt.Printf("String: %s, Number: %d, Slice: %v\n", str, num, slice)
 }
 ```
 
@@ -322,7 +274,6 @@ func main() {
     cacheContainer.Add(godi.Provide(Cache{Host: "redis://localhost"}))
     
     // Inject from multiple containers
-    // Inject will search through all provided containers
     db, _ := godi.Inject[Database](dbContainer, cacheContainer)
     cache, _ := godi.Inject[Cache](dbContainer, cacheContainer)
     
@@ -330,7 +281,7 @@ func main() {
 }
 ```
 
-### Using InjectTo
+### Error Handling with ShouldInject
 
 ```go
 package main
@@ -341,43 +292,87 @@ import (
 )
 
 type Config struct {
-    AppName string
+    Port int
 }
 
 func main() {
     c := &godi.Container{}
-    c.Add(godi.Provide(Config{AppName: "my-app"}))
+    c.Add(godi.Provide(Config{Port: 8080}))
     
-    // Use InjectTo to inject directly into a variable
-    var cfg Config
-    ok := godi.InjectTo(&cfg, c)
+    // Graceful error handling
+    config, err := godi.ShouldInject[Config](c)
+    if err != nil {
+        panic(err)
+    }
     
-    fmt.Printf("Injected: %v, App: %s\n", ok, cfg.AppName)
+    fmt.Printf("Server starting on port %d\n", config.Port)
 }
 ```
 
-### Using MustInject for Critical Dependencies
+### Complex Dependency Graph
 
 ```go
 package main
 
 import (
+    "fmt"
     "github.com/Just-maple/godi"
 )
 
-type CriticalConfig struct {
-    SecretKey string
+type Config struct {
+    DSN string
+}
+
+type Database struct {
+    DSN string
+}
+
+type Repository struct {
+    DB Database
+}
+
+type Service struct {
+    Repo Repository
 }
 
 func main() {
     c := &godi.Container{}
-    c.Add(godi.Provide(CriticalConfig{SecretKey: "my-secret"}))
     
-    // Use MustInject when dependency is critical
-    config := godi.MustInject[CriticalConfig](c)
+    // Register config
+    c.Add(godi.Provide(Config{DSN: "mysql://localhost"}))
     
-    // Continue with guaranteed config
-    _ = config
+    // Lazy loading with dependencies
+    c.Add(godi.Lazy(func() (Database, error) {
+        cfg, err := godi.ShouldInject[Config](c)
+        if err != nil {
+            return Database{}, err
+        }
+        return Database{DSN: cfg.DSN}, nil
+    }))
+    
+    c.Add(godi.Lazy(func() (Repository, error) {
+        db, err := godi.ShouldInject[Database](c)
+        if err != nil {
+            return Repository{}, err
+        }
+        return Repository{DB: db}, nil
+    }))
+    
+    c.Add(godi.Lazy(func() (Service, error) {
+        repo, err := godi.ShouldInject[Repository](c)
+        if err != nil {
+            return Service{}, err
+        }
+        return Service{Repo: repo}, nil
+    }))
+    
+    // Inject top-level service
+    svc, err := godi.ShouldInject[Service](c)
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("Service ready: DB=%s\n", svc.Repo.DB.DSN)
 }
 ```
 
@@ -419,9 +414,35 @@ go func() {
 
 1. **Register dependencies early**: Set up your container at application startup
 2. **Use ShouldInject for error handling**: Prefer `ShouldInject` over `MustInject` when you want to handle errors gracefully
-3. **Group related dependencies**: Consider using structs to group related configurations
+3. **Use Lazy for expensive resources**: Database connections, HTTP clients, etc.
 4. **Avoid circular dependencies**: Design your dependency graph carefully
 5. **Use multiple containers for modularity**: Separate concerns by using different containers for different modules
+6. **Depend on interfaces**: Use interfaces for cross-layer dependencies (see examples/09-web-app)
+
+## Examples Directory
+
+| Example | Description |
+|---------|-------------|
+| [01-basic](examples/01-basic/) | Basic dependency injection |
+| [02-error-handling](examples/02-error-handling/) | Error handling patterns |
+| [03-must-inject](examples/03-must-inject/) | Panic-on-error injection |
+| [04-all-types](examples/04-all-types/) | All supported types |
+| [05-multi-container](examples/05-multi-container/) | Multiple containers |
+| [06-concurrent](examples/06-concurrent/) | Concurrent access |
+| [07-generics](examples/07-generics/) | Generic type injection |
+| [08-testing-mock](examples/08-testing-mock/) | Testing with mocks |
+| [09-web-app](examples/09-web-app/) | Production web app (SOLID principles) |
+
+## Comparison
+
+| Feature | Godi | dig/fx | wire |
+|---------|------|--------|------|
+| **Type Resolution** | Generics | Reflection | Code Gen |
+| **Error Detection** | Compile-time | Runtime | Compile-time |
+| **Performance** | Zero overhead | Reflection cost | Zero overhead |
+| **Setup** | No setup | No setup | Code generation |
+| **Multi-container** | ✅ Built-in | ❌ Single | ❌ Single |
+| **Circular Detection** | ✅ Runtime | ✅ Runtime | ✅ Compile-time |
 
 ## License
 

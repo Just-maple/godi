@@ -1,4 +1,4 @@
-package di
+package godi
 
 import (
 	"fmt"
@@ -430,7 +430,7 @@ func TestShouldInject_ErrorMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	expectedMsg := "provider di.Database not found"
+	expectedMsg := "provider godi.Database not found"
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error message %q, got %q", expectedMsg, err.Error())
 	}
@@ -443,7 +443,7 @@ func TestContainer_ShouldAdd_ErrorMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	expectedPrefix := "provider *di.Database already exists"
+	expectedPrefix := "provider *godi.Database already exists"
 	if err.Error() != expectedPrefix {
 		t.Errorf("expected error message %q, got %q", expectedPrefix, err.Error())
 	}

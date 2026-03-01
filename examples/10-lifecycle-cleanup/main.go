@@ -124,7 +124,7 @@ func main() {
 
 	c.MustAdd(
 		godi.Provide(lifecycle),
-		godi.Lazy(func(_ *godi.Container) (*Database, error) {
+		godi.Lazy(func(c *godi.Container) (*Database, error) {
 			db := &Database{name: "main-db"}
 			fmt.Printf("[Database] %s connected\n", db.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -132,7 +132,7 @@ func main() {
 			})
 			return db, nil
 		}),
-		godi.Lazy(func(_ *godi.Container) (*Cache, error) {
+		godi.Lazy(func(c *godi.Container) (*Cache, error) {
 			cache := &Cache{name: "redis-cache"}
 			fmt.Printf("[Cache] %s connected\n", cache.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -140,7 +140,7 @@ func main() {
 			})
 			return cache, nil
 		}),
-		godi.Lazy(func(_ *godi.Container) (*Service, error) {
+		godi.Lazy(func(c *godi.Container) (*Service, error) {
 			service := &Service{name: "user-service"}
 			fmt.Printf("[Service] %s initialized\n", service.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -148,12 +148,24 @@ func main() {
 			})
 			return service, nil
 		}),
-		godi.Lazy(func(_ *godi.Container) (*App, error) {
-			db, _ := godi.Inject[*Database](c)
-			cache, _ := godi.Inject[*Cache](c)
-			service, _ := godi.Inject[*Service](c)
-			lifecycle, _ := godi.Inject[*Lifecycle](c)
-			return NewApp(db, cache, service, lifecycle), nil
+		godi.Lazy(func(c *godi.Container) (*App, error) {
+			db, err := godi.Inject[*Database](c)
+			if err != nil {
+				return nil, err
+			}
+			cache, err := godi.Inject[*Cache](c)
+			if err != nil {
+				return nil, err
+			}
+			service, err := godi.Inject[*Service](c)
+			if err != nil {
+				return nil, err
+			}
+			lc, err := godi.Inject[*Lifecycle](c)
+			if err != nil {
+				return nil, err
+			}
+			return NewApp(db, cache, service, lc), nil
 		}),
 	)
 

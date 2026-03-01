@@ -34,6 +34,10 @@ type UserService struct {
 	DB Database
 }
 
+func NewUserService(db Database) *UserService {
+	return &UserService{DB: db}
+}
+
 func (s *UserService) GetUser(id int) (map[string]interface{}, error) {
 	results, err := s.DB.Query(fmt.Sprintf("SELECT * FROM users WHERE id = %d", id))
 	if err != nil {
@@ -49,8 +53,16 @@ func main() {
 	// Production configuration
 	prodContainer := &godi.Container{}
 	prodContainer.MustAdd(
-		godi.Provide(&RealDatabase{DSN: "mysql://localhost/prod"}),
-		godi.Provide(&UserService{DB: &RealDatabase{DSN: "mysql://localhost/prod"}}),
+		godi.Provide(func() Database {
+			return &RealDatabase{DSN: "mysql://localhost/prod"}
+		}()),
+		godi.Lazy(func(c *godi.Container) (*UserService, error) {
+			db, err := godi.Inject[Database](c)
+			if err != nil {
+				return nil, err
+			}
+			return NewUserService(db), nil
+		}),
 	)
 
 	// Test configuration (using Mock)
@@ -61,8 +73,16 @@ func main() {
 		},
 	}
 	testContainer.MustAdd(
-		godi.Provide(mockDB),
-		godi.Provide(&UserService{DB: mockDB}),
+		godi.Provide(func() Database {
+			return mockDB
+		}()),
+		godi.Lazy(func(c *godi.Container) (*UserService, error) {
+			db, err := godi.Inject[Database](c)
+			if err != nil {
+				return nil, err
+			}
+			return NewUserService(db), nil
+		}),
 	)
 
 	// Use test container

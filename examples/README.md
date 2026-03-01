@@ -7,14 +7,16 @@ This directory contains examples demonstrating various features of the godi depe
 | Example | Description | Key Features |
 |---------|-------------|--------------|
 | [01-basic](01-basic/) | Basic dependency injection | Provide, Inject |
-| [02-error-handling](02-error-handling/) | Error handling patterns | ShouldInject, error returns |
-| [03-must-inject](03-must-inject/) | Panic-on-error injection | MustInject, panic handling |
-| [04-all-types](04-all-types/) | All supported types | Structs, pointers, slices, maps |
-| [05-multi-container](05-multi-container/) | Multiple containers | Container isolation |
+| [02-error-handling](02-error-handling/) | Error handling patterns | Add, Inject with error returns |
+| [03-must-inject](03-must-inject/) | Panic-on-error injection | MustAdd, MustInject, MustInjectTo |
+| [04-all-types](04-all-types/) | All supported types | Structs, pointers, slices, maps, functions |
+| [05-multi-container](05-multi-container/) | Multiple containers | Cross-container injection |
 | [06-concurrent](06-concurrent/) | Concurrent access | Thread-safe operations |
-| [07-generics](07-generics/) | Generic type injection | Type parameters |
-| [08-testing-mock](08-testing-mock/) | Testing with mocks | Interface-based testing |
-| [09-web-app](09-web-app/) | Production web app | SOLID principles, DIP |
+| [07-generics](07-generics/) | Generic type injection | Type parameters, constructor injection |
+| [08-testing-mock](08-testing-mock/) | Testing with mocks | Interface-based testing, DI |
+| [09-web-app](09-web-app/) | Production web app | SOLID principles, DIP, layered architecture |
+| [10-lifecycle-cleanup](10-lifecycle-cleanup/) | Resource cleanup | Lifecycle hooks, graceful shutdown |
+| [11-chain](11-chain/) | Dependency transformation | Chain, Lazy, constructor injection |
 
 ## Quick Start
 

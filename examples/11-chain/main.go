@@ -24,9 +24,17 @@ type Repository struct {
 	DB *Database
 }
 
+func NewRepository(db *Database) *Repository {
+	return &Repository{DB: db}
+}
+
 type Service struct {
 	Repo *Repository
 	Name string
+}
+
+func NewService(repo *Repository, name string) *Service {
+	return &Service{Repo: repo, Name: name}
 }
 
 func main() {
@@ -69,13 +77,21 @@ func main() {
 			fmt.Printf("Creating Database from Config: %s\n", cfg.DSN)
 			return &Database{ConnString: cfg.DSN, Connected: true}, nil
 		}),
-		godi.Chain(func(db *Database) (*Repository, error) {
+		godi.Lazy(func(c *godi.Container) (*Repository, error) {
+			db, err := godi.Inject[*Database](c)
+			if err != nil {
+				return nil, err
+			}
 			fmt.Printf("Creating Repository with Database: %s\n", db.ConnString)
-			return &Repository{DB: db}, nil
+			return NewRepository(db), nil
 		}),
-		godi.Chain(func(repo *Repository) (*Service, error) {
+		godi.Lazy(func(c *godi.Container) (*Service, error) {
+			repo, err := godi.Inject[*Repository](c)
+			if err != nil {
+				return nil, err
+			}
 			fmt.Printf("Creating Service with Repository\n")
-			return &Service{Repo: repo, Name: "UserService"}, nil
+			return NewService(repo, "UserService"), nil
 		}),
 	)
 

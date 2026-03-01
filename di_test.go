@@ -42,41 +42,87 @@ func TestProvide(t *testing.T) {
 }
 
 func TestContainer_AddAndInject(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide(Database{DSN: "mysql://localhost:3306/test"}),
-		Provide(Config{AppName: "test-app"}),
-	)
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) (any, error)
+		wantVal  any
+		wantErr  bool
+	}{
+		{
+			name: "Database",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[Database](c) },
+			wantVal:  Database{DSN: "mysql://localhost:3306/test"},
+		},
+		{
+			name: "Config",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Config{AppName: "test-app"}))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[Config](c) },
+			wantVal:  Config{AppName: "test-app"},
+		},
+	}
 
-	gotDB, err := Inject[Database](c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotDB.DSN != "mysql://localhost:3306/test" {
-		t.Errorf("expected mysql://localhost:3306/test, got %s", gotDB.DSN)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			got, err := tt.injectFn(c)
 
-	gotCfg, err := Inject[Config](c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotCfg.AppName != "test-app" {
-		t.Errorf("expected test-app, got %s", gotCfg.AppName)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.wantVal {
+				t.Errorf("got %v, want %v", got, tt.wantVal)
+			}
+		})
 	}
 }
 
 func TestContainer_Add(t *testing.T) {
-	t.Run("unique", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	})
-	t.Run("duplicate error", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-		if err := c.Add(Provide(Database{DSN: "mysql://remote"})); err == nil {
-			t.Fatal("expected error")
-		}
-	})
+	tests := []struct {
+		name    string
+		setup   func() *Container
+		addFn   func(*Container) error
+		wantErr bool
+	}{
+		{
+			name:  "unique",
+			setup: func() *Container { return &Container{} },
+			addFn: func(c *Container) error {
+				return c.Add(Provide(Database{DSN: "mysql://localhost"}))
+			},
+		},
+		{
+			name: "duplicate error",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			addFn: func(c *Container) error {
+				return c.Add(Provide(Database{DSN: "mysql://remote"}))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			err := tt.addFn(c)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestInject_ServiceWithDependencies(t *testing.T) {
@@ -99,137 +145,255 @@ func TestInject_ServiceWithDependencies(t *testing.T) {
 }
 
 func TestInjectTo(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
-
-	var db Database
-	if err := InjectTo(&db, c); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) error
+		wantVal  any
+		wantErr  bool
+	}{
+		{
+			name: "InjectTo success",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				var db Database
+				if err := InjectTo(&db, c); err != nil {
+					return err
+				}
+				if db.DSN != "mysql://localhost:3306/test" {
+					return fmt.Errorf("expected mysql://localhost:3306/test, got %s", db.DSN)
+				}
+				return nil
+			},
+		},
+		{
+			name: "InjectAs success",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				db := Database{}
+				if err := InjectAs(&db, c); err != nil {
+					return err
+				}
+				if db.DSN != "mysql://localhost:3306/test" {
+					return fmt.Errorf("expected mysql://localhost:3306/test, got %s", db.DSN)
+				}
+				return nil
+			},
+		},
 	}
-	if db.DSN != "mysql://localhost:3306/test" {
-		t.Errorf("expected mysql://localhost:3306/test, got %s", db.DSN)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			if err := tt.injectFn(c); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
-func TestInjectAs(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
-
-	db := Database{}
-	if err := InjectAs(&db, c); err != nil {
-		t.Fatal(err)
+func TestInject_ErrorCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) error
+		wantErr  bool
+	}{
+		{
+			name:  "InjectTo not found",
+			setup: func() *Container { return &Container{} },
+			injectFn: func(c *Container) error {
+				var db Database
+				return InjectTo(&db, c)
+			},
+			wantErr: true,
+		},
+		{
+			name: "InjectTo wrong type",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "test"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				var cfg Config
+				return InjectTo(&cfg, c)
+			},
+			wantErr: true,
+		},
+		{
+			name:  "InjectAs not found",
+			setup: func() *Container { return &Container{} },
+			injectFn: func(c *Container) error {
+				db := Database{}
+				return InjectAs(&db, c)
+			},
+			wantErr: true,
+		},
+		{
+			name: "InjectAs wrong type",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "test"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				cfg := Config{}
+				return InjectAs(&cfg, c)
+			},
+			wantErr: true,
+		},
 	}
-	if db.DSN != "mysql://localhost:3306/test" {
-		t.Errorf("expected mysql://localhost:3306/test, got %s", db.DSN)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			err := tt.injectFn(c)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
-}
-
-func TestInjectTo_ErrorCases(t *testing.T) {
-	t.Run("not found", func(t *testing.T) {
-		var db Database
-		if err := InjectTo(&db, &Container{}); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-	t.Run("wrong type", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "test"}))
-		var cfg Config
-		if err := InjectTo(&cfg, c); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-}
-
-func TestInjectAs_ErrorCases(t *testing.T) {
-	t.Run("not found", func(t *testing.T) {
-		db := Database{}
-		if err := InjectAs(&db, &Container{}); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-	t.Run("wrong type", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "test"}))
-		cfg := Config{}
-		if err := InjectAs(&cfg, c); err == nil {
-			t.Fatal("expected error")
-		}
-	})
 }
 
 func TestMustInject(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatal("unexpected panic")
-			}
-		}()
-		db := MustInject[Database](c)
-		if db.DSN != "mysql://localhost" {
-			t.Errorf("expected mysql://localhost, got %s", db.DSN)
-		}
-	})
-	t.Run("panic on not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("expected panic")
-			}
-		}()
-		MustInject[Database](&Container{})
-	})
+	tests := []struct {
+		name      string
+		setup     func() *Container
+		injectFn  func(*Container)
+		wantPanic bool
+		wantVal   any
+	}{
+		{
+			name: "success",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) {
+				db := MustInject[Database](c)
+				if db.DSN != "mysql://localhost" {
+					t.Errorf("expected mysql://localhost, got %s", db.DSN)
+				}
+			},
+		},
+		{
+			name:      "panic on not found",
+			setup:     func() *Container { return &Container{} },
+			injectFn:  func(c *Container) { MustInject[Database](c) },
+			wantPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			defer func() {
+				if r := recover(); (r != nil) != tt.wantPanic {
+					t.Errorf("panic = %v, wantPanic %v", r != nil, tt.wantPanic)
+				}
+			}()
+			tt.injectFn(c)
+		})
+	}
 }
 
 func TestMustInjectTo(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-		var db Database
-		MustInjectTo(&db, c)
-		if db.DSN != "mysql://localhost" {
-			t.Errorf("expected mysql://localhost, got %s", db.DSN)
-		}
-	})
-	t.Run("panic on not found", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("expected panic")
-			}
-		}()
-		var db Database
-		MustInjectTo(&db, &Container{})
-	})
+	tests := []struct {
+		name      string
+		setup     func() *Container
+		injectFn  func(*Container)
+		wantPanic bool
+		wantVal   any
+	}{
+		{
+			name: "success",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) {
+				var db Database
+				MustInjectTo(&db, c)
+				if db.DSN != "mysql://localhost" {
+					t.Errorf("expected mysql://localhost, got %s", db.DSN)
+				}
+			},
+		},
+		{
+			name:      "panic on not found",
+			setup:     func() *Container { return &Container{} },
+			injectFn:  func(c *Container) { var db Database; MustInjectTo(&db, c) },
+			wantPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			defer func() {
+				if r := recover(); (r != nil) != tt.wantPanic {
+					t.Errorf("panic = %v, wantPanic %v", r != nil, tt.wantPanic)
+				}
+			}()
+			tt.injectFn(c)
+		})
+	}
 }
 
 func TestContainer_MustAdd(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		c := &Container{}
-		defer func() {
-			if r := recover(); r != nil {
-				t.Fatal("unexpected panic")
-			}
-		}()
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	})
-	t.Run("panic on duplicate", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("expected panic")
-			}
-		}()
-		c.MustAdd(Provide(Database{DSN: "mysql://remote"}))
-	})
+	tests := []struct {
+		name      string
+		setup     func() *Container
+		addFn     func(*Container)
+		wantPanic bool
+	}{
+		{
+			name:  "success",
+			setup: func() *Container { return &Container{} },
+			addFn: func(c *Container) {
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+			},
+		},
+		{
+			name: "panic on duplicate",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			addFn: func(c *Container) {
+				c.MustAdd(Provide(Database{DSN: "mysql://remote"}))
+			},
+			wantPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			defer func() {
+				if r := recover(); (r != nil) != tt.wantPanic {
+					t.Errorf("panic = %v, wantPanic %v", r != nil, tt.wantPanic)
+				}
+			}()
+			tt.addFn(c)
+		})
+	}
 }
 
 func TestContainer_ProviderID(t *testing.T) {
-	c := &Container{}
 	p := Provide(Database{DSN: "test"})
-	c.MustAdd(p)
-
 	id := p.ID()
 	if id == nil {
 		t.Fatal("expected non-nil ID")
@@ -237,100 +401,236 @@ func TestContainer_ProviderID(t *testing.T) {
 }
 
 func TestProvide_AllTypes(t *testing.T) {
-	t.Run("primitives", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(
-			Provide("test"),
-			Provide(42),
-			Provide(int8(8)),
-			Provide(int16(16)),
-			Provide(int32(32)),
-			Provide(int64(64)),
-			Provide(uint(100)),
-			Provide(uint8(8)),
-			Provide(uint16(16)),
-			Provide(uint32(32)),
-			Provide(uint64(64)),
-			Provide(float32(3.14)),
-			Provide(3.14159),
-			Provide(true),
-		)
-		if v, err := Inject[string](c); err != nil || v != "test" {
-			t.Errorf("string: %v", err)
-		}
-		if v, err := Inject[int](c); err != nil || v != 42 {
-			t.Errorf("int: %v", err)
-		}
-		if v, err := Inject[int8](c); err != nil || v != 8 {
-			t.Errorf("int8: %v", err)
-		}
-		if v, err := Inject[int16](c); err != nil || v != 16 {
-			t.Errorf("int16: %v", err)
-		}
-		if v, err := Inject[int64](c); err != nil || v != 64 {
-			t.Errorf("int64: %v", err)
-		}
-		if v, err := Inject[uint](c); err != nil || v != 100 {
-			t.Errorf("uint: %v", err)
-		}
-		if v, err := Inject[float32](c); err != nil || v != 3.14 {
-			t.Errorf("float32: %v", err)
-		}
-		if v, err := Inject[float64](c); err != nil || v != 3.14159 {
-			t.Errorf("float64: %v", err)
-		}
-		if v, err := Inject[bool](c); err != nil || !v {
-			t.Errorf("bool: %v", err)
-		}
-	})
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) error
+	}{
+		{
+			name: "primitives",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide("test"),
+					Provide(42),
+					Provide(int8(8)),
+					Provide(int16(16)),
+					Provide(int32(32)),
+					Provide(int64(64)),
+					Provide(uint(100)),
+					Provide(uint8(8)),
+					Provide(uint16(16)),
+					Provide(uint32(32)),
+					Provide(uint64(64)),
+					Provide(float32(3.14)),
+					Provide(3.14159),
+					Provide(true),
+				)
+				return c
+			},
+			injectFn: func(c *Container) error {
+				tests := []struct {
+					name string
+					fn   func() error
+				}{
+					{"string", func() error {
+						v, err := Inject[string](c)
+						if err != nil || v != "test" {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"int", func() error {
+						v, err := Inject[int](c)
+						if err != nil || v != 42 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"int8", func() error {
+						v, err := Inject[int8](c)
+						if err != nil || v != 8 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"int16", func() error {
+						v, err := Inject[int16](c)
+						if err != nil || v != 16 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"int64", func() error {
+						v, err := Inject[int64](c)
+						if err != nil || v != 64 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"uint", func() error {
+						v, err := Inject[uint](c)
+						if err != nil || v != 100 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"float32", func() error {
+						v, err := Inject[float32](c)
+						if err != nil || v != 3.14 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"float64", func() error {
+						v, err := Inject[float64](c)
+						if err != nil || v != 3.14159 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"bool", func() error {
+						v, err := Inject[bool](c)
+						if err != nil || !v {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+				}
+				for _, tt := range tests {
+					if err := tt.fn(); err != nil {
+						return fmt.Errorf("%s: %v", tt.name, err)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			name: "collections",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide([]string{"a", "b", "c"}),
+					Provide([]int{1, 2, 3}),
+					Provide([]byte{0x01, 0x02, 0x03}),
+					Provide(map[string]int{"a": 1, "b": 2}),
+					Provide([3]int{1, 2, 3}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) error {
+				tests := []struct {
+					name string
+					fn   func() error
+				}{
+					{"[]string", func() error {
+						v, err := Inject[[]string](c)
+						if err != nil || len(v) != 3 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"[]int", func() error {
+						v, err := Inject[[]int](c)
+						if err != nil || len(v) != 3 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"[]byte", func() error {
+						v, err := Inject[[]byte](c)
+						if err != nil || len(v) != 3 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"map[string]int", func() error {
+						v, err := Inject[map[string]int](c)
+						if err != nil || v["a"] != 1 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"[3]int", func() error {
+						v, err := Inject[[3]int](c)
+						if err != nil || v[0] != 1 {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+				}
+				for _, tt := range tests {
+					if err := tt.fn(); err != nil {
+						return fmt.Errorf("%s: %v", tt.name, err)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			name: "advanced",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(&struct{ Name string }{Name: "Alice"}),
+					Provide(make(chan int)),
+					Provide(func() string { return "hello" }),
+					Provide(any("interface")),
+				)
+				return c
+			},
+			injectFn: func(c *Container) error {
+				tests := []struct {
+					name string
+					fn   func() error
+				}{
+					{"*struct", func() error {
+						v, err := Inject[*struct{ Name string }](c)
+						if err != nil || v.Name != "Alice" {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"chan int", func() error {
+						v, err := Inject[chan int](c)
+						if err != nil || v == nil {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+					{"func", func() error {
+						v, err := Inject[func() string](c)
+						if err != nil || v() != "hello" {
+							return fmt.Errorf("func returned wrong value")
+						}
+						return nil
+					}},
+					{"any", func() error {
+						v, err := Inject[any](c)
+						if err != nil || v != "interface" {
+							return fmt.Errorf("got %v", v)
+						}
+						return nil
+					}},
+				}
+				for _, tt := range tests {
+					if err := tt.fn(); err != nil {
+						return fmt.Errorf("%s: %v", tt.name, err)
+					}
+				}
+				return nil
+			},
+		},
+	}
 
-	t.Run("collections", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(
-			Provide([]string{"a", "b", "c"}),
-			Provide([]int{1, 2, 3}),
-			Provide([]byte{0x01, 0x02, 0x03}),
-			Provide(map[string]int{"a": 1, "b": 2}),
-			Provide([3]int{1, 2, 3}),
-		)
-		if v, err := Inject[[]string](c); err != nil || len(v) != 3 {
-			t.Errorf("[]string: %v", err)
-		}
-		if v, err := Inject[[]int](c); err != nil || len(v) != 3 {
-			t.Errorf("[]int: %v", err)
-		}
-		if v, err := Inject[[]byte](c); err != nil || len(v) != 3 {
-			t.Errorf("[]byte: %v", err)
-		}
-		if v, err := Inject[map[string]int](c); err != nil || v["a"] != 1 {
-			t.Errorf("map: %v", err)
-		}
-		if v, err := Inject[[3]int](c); err != nil || v[0] != 1 {
-			t.Errorf("[3]int: %v", err)
-		}
-	})
-
-	t.Run("advanced", func(t *testing.T) {
-		c := &Container{}
-		c.MustAdd(
-			Provide(&struct{ Name string }{Name: "Alice"}),
-			Provide(make(chan int)),
-			Provide(func() string { return "hello" }),
-			Provide(any("interface")),
-		)
-		if v, err := Inject[*struct{ Name string }](c); err != nil || v.Name != "Alice" {
-			t.Errorf("*struct: %v", err)
-		}
-		if v, err := Inject[chan int](c); err != nil || v == nil {
-			t.Errorf("chan: %v", err)
-		}
-		if v, err := Inject[func() string](c); err != nil || v() != "hello" {
-			t.Errorf("func: %v", err)
-		}
-		if v, err := Inject[any](c); err != nil || v != "interface" {
-			t.Errorf("any: %v", err)
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			if err := tt.injectFn(c); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 }
 
 type L0 int
@@ -462,70 +762,140 @@ func TestCircularDependency(t *testing.T) {
 }
 
 func TestMultiContainer(t *testing.T) {
-	c1, c2, c3 := &Container{}, &Container{}, &Container{}
-	c1.MustAdd(Provide(Database{DSN: "db1"}))
-	c2.MustAdd(Provide(Config{AppName: "app2"}))
-	c3.MustAdd(Provide(Service{Name: "svc3"}))
-
-	db, err := Inject[Database](c1, c2, c3)
-	if err != nil || db.DSN != "db1" {
-		t.Errorf("expected db1, got %v", db)
+	tests := []struct {
+		name     string
+		setup    func() ([]*Container, *Container)
+		injectFn func([]*Container) (any, error)
+		wantVal  any
+	}{
+		{
+			name: "Database from c1",
+			setup: func() ([]*Container, *Container) {
+				c1, c2, c3 := &Container{}, &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				c3.MustAdd(Provide(Service{Name: "svc3"}))
+				return []*Container{c1, c2, c3}, c1
+			},
+			injectFn: func(cs []*Container) (any, error) { return Inject[Database](cs...) },
+			wantVal:  Database{DSN: "db1"},
+		},
+		{
+			name: "Config from c2",
+			setup: func() ([]*Container, *Container) {
+				c1, c2, c3 := &Container{}, &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				c3.MustAdd(Provide(Service{Name: "svc3"}))
+				return []*Container{c1, c2, c3}, c2
+			},
+			injectFn: func(cs []*Container) (any, error) { return Inject[Config](cs...) },
+			wantVal:  Config{AppName: "app2"},
+		},
+		{
+			name: "Service from c3",
+			setup: func() ([]*Container, *Container) {
+				c1, c2, c3 := &Container{}, &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				c3.MustAdd(Provide(Service{Name: "svc3"}))
+				return []*Container{c1, c2, c3}, c3
+			},
+			injectFn: func(cs []*Container) (any, error) { return Inject[Service](cs...) },
+			wantVal:  Service{Name: "svc3"},
+		},
+		{
+			name: "InjectTo Database",
+			setup: func() ([]*Container, *Container) {
+				c1, c2 := &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				return []*Container{c1, c2}, c1
+			},
+			injectFn: func(cs []*Container) (any, error) {
+				var db Database
+				err := InjectTo(&db, cs...)
+				return db, err
+			},
+			wantVal: Database{DSN: "db1"},
+		},
+		{
+			name: "InjectTo Config",
+			setup: func() ([]*Container, *Container) {
+				c1, c2 := &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				return []*Container{c1, c2}, c2
+			},
+			injectFn: func(cs []*Container) (any, error) {
+				var cfg Config
+				err := InjectTo(&cfg, cs...)
+				return cfg, err
+			},
+			wantVal: Config{AppName: "app2"},
+		},
+		{
+			name: "InjectAs Database",
+			setup: func() ([]*Container, *Container) {
+				c1, c2 := &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				return []*Container{c1, c2}, c1
+			},
+			injectFn: func(cs []*Container) (any, error) {
+				db := Database{}
+				err := InjectAs(&db, cs...)
+				return db, err
+			},
+			wantVal: Database{DSN: "db1"},
+		},
+		{
+			name: "InjectAs Config",
+			setup: func() ([]*Container, *Container) {
+				c1, c2 := &Container{}, &Container{}
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
+				c2.MustAdd(Provide(Config{AppName: "app2"}))
+				return []*Container{c1, c2}, c2
+			},
+			injectFn: func(cs []*Container) (any, error) {
+				cfg := Config{}
+				err := InjectAs(&cfg, cs...)
+				return cfg, err
+			},
+			wantVal: Config{AppName: "app2"},
+		},
+		{
+			name: "not found",
+			setup: func() ([]*Container, *Container) {
+				c1, c2 := &Container{}, &Container{}
+				c1.Add(Provide(Database{DSN: "db1"}))
+				return []*Container{c1, c2}, nil
+			},
+			injectFn: func(cs []*Container) (any, error) {
+				_, err := Inject[Config](cs...)
+				return nil, err
+			},
+			wantVal: nil,
+		},
 	}
 
-	cfg, err := Inject[Config](c1, c2, c3)
-	if err != nil || cfg.AppName != "app2" {
-		t.Errorf("expected app2, got %v", cfg)
-	}
-
-	svc, err := Inject[Service](c1, c2, c3)
-	if err != nil || svc.Name != "svc3" {
-		t.Errorf("expected svc3, got %v", svc)
-	}
-}
-
-func TestMultiContainer_InjectTo(t *testing.T) {
-	c1, c2 := &Container{}, &Container{}
-	c1.MustAdd(Provide(Database{DSN: "db1"}))
-	c2.MustAdd(Provide(Config{AppName: "app2"}))
-
-	var db Database
-	if err := InjectTo(&db, c1, c2); err != nil || db.DSN != "db1" {
-		t.Errorf("expected db1, got %v", db)
-	}
-
-	var cfg Config
-	if err := InjectTo(&cfg, c1, c2); err != nil || cfg.AppName != "app2" {
-		t.Errorf("expected app2, got %v", cfg)
-	}
-}
-
-func TestMultiContainer_InjectAs(t *testing.T) {
-	c1, c2 := &Container{}, &Container{}
-	c1.MustAdd(Provide(Database{DSN: "db1"}))
-	c2.MustAdd(Provide(Config{AppName: "app2"}))
-
-	db := Database{}
-	if err := InjectAs(&db, c1, c2); err != nil || db.DSN != "db1" {
-		t.Errorf("expected db1, got %v", db)
-	}
-
-	cfg := Config{}
-	if err := InjectAs(&cfg, c1, c2); err != nil || cfg.AppName != "app2" {
-		t.Errorf("expected app2, got %v", cfg)
-	}
-}
-
-func TestMultiContainer_NotFound(t *testing.T) {
-	c1, c2 := &Container{}, &Container{}
-	c1.Add(Provide(Database{DSN: "db1"}))
-
-	if _, err := Inject[Config](c1, c2); err == nil {
-		t.Error("expected error")
-	}
-
-	var cfg Config
-	if err := InjectTo(&cfg, c1, c2); err == nil {
-		t.Error("expected error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, _ := tt.setup()
+			got, err := tt.injectFn(cs)
+			if tt.wantVal == nil {
+				if err == nil {
+					t.Error("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantVal {
+				t.Errorf("got %v, want %v", got, tt.wantVal)
+			}
+		})
 	}
 }
 

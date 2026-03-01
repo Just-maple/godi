@@ -14,8 +14,8 @@ type Provider interface {
 type provider[T any] func(*Container, any) error
 
 func (p provider[T]) Is(a any) bool                      { _, ok := a.(*T); return ok }
-func (p provider[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
 func (p provider[T]) ID() any                            { return (*T)(nil) }
+func (p provider[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
 
 func Provide[T any](v T) Provider {
 	return provider[T](func(_ *Container, p any) error { *p.(*T) = v; return nil })
@@ -75,9 +75,8 @@ func (c *Container) inject(provider Provider, id, v any) (err error) {
 	if _, on := c.injecting.LoadOrStore(id, true); on {
 		return fmt.Errorf("circular dependency for %T", v)
 	}
-	err = provider.inject(c, v)
-	c.injecting.Delete(id)
-	return
+	defer c.injecting.Delete(id)
+	return provider.inject(c, v)
 }
 
 func InjectAs(v any, cs ...*Container) (err error) {

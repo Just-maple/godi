@@ -101,19 +101,19 @@ examples/09-web-app/
 // wire.go - Register abstractions, not concretions
 
 // Infrastructure layer - returns interfaces
-c.Add(godi.Lazy(func() (interfaces.Database, error) {
+c.Add(godi.Build(func() (interfaces.Database, error) {
     cfg, _ := godi.ShouldInject[*config.Config](c)
     return infrastructure.NewDBConnection(cfg.DatabaseDSN), nil
 }))
 
 // Repository layer - depends on interfaces.Database
-c.Add(godi.Lazy(func() (repository.UserRepositoryInterface, error) {
+c.Add(godi.Build(func() (repository.UserRepositoryInterface, error) {
     db, _ := godi.ShouldInject[interfaces.Database](c)
     return repository.NewUserRepository(db), nil
 }))
 
 // Service layer - depends on interfaces
-c.Add(godi.Lazy(func() (service.UserServiceInterface, error) {
+c.Add(godi.Build(func() (service.UserServiceInterface, error) {
     repo, _ := godi.ShouldInject[repository.UserRepositoryInterface](c)
     cache, _ := godi.ShouldInject[interfaces.Cache](c)
     return service.NewUserService(repo, cache), nil
@@ -133,7 +133,7 @@ go run cmd/main.go
 === Web Application Example ===
 Best Practices: Separation of Concerns
 
-✓ Container created (Lazy loading)
+✓ Container created (Build loading)
 ✓ Using Dependency Inversion Principle
 ✓ All dependencies injected
 
@@ -208,5 +208,5 @@ type Middleware interface {
 2. ✅ **Dependency Inversion** - High-level modules don't depend on low-level modules
 3. ✅ **Single Responsibility** - Each package has one reason to change
 4. ✅ **Explicit Dependencies** - All dependencies are clearly declared
-5. ✅ **Lazy Initialization** - Resources created only when needed
+5. ✅ **Build Initialization** - Resources created only when needed
 6. ✅ **English Documentation** - All code documented in English

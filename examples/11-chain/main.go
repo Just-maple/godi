@@ -77,7 +77,7 @@ func main() {
 			fmt.Printf("Creating Database from Config: %s\n", cfg.DSN)
 			return &Database{ConnString: cfg.DSN, Connected: true}, nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*Repository, error) {
+		godi.Build(func(c *godi.Container) (*Repository, error) {
 			db, err := godi.Inject[*Database](c)
 			if err != nil {
 				return nil, err
@@ -85,7 +85,7 @@ func main() {
 			fmt.Printf("Creating Repository with Database: %s\n", db.ConnString)
 			return NewRepository(db), nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*Service, error) {
+		godi.Build(func(c *godi.Container) (*Service, error) {
 			repo, err := godi.Inject[*Repository](c)
 			if err != nil {
 				return nil, err

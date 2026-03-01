@@ -32,14 +32,14 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 // Register dependencies with cleanup hooks
 c.MustAdd(
     godi.Provide(lifecycle),
-    godi.Lazy(func(c *godi.Container) (*Database, error) {
+    godi.Build(func(c *godi.Container) (*Database, error) {
         db := &Database{name: "main-db"}
         lifecycle.AddShutdownHook(func(ctx context.Context) error {
             return db.Close()
         })
         return db, nil
     }),
-    godi.Lazy(func(c *godi.Container) (*App, error) {
+    godi.Build(func(c *godi.Container) (*App, error) {
         db, _ := godi.Inject[*Database](c)
         cache, _ := godi.Inject[*Cache](c)
         service, _ := godi.Inject[*Service](c)

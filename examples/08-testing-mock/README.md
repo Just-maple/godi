@@ -41,7 +41,7 @@ prodContainer.MustAdd(
     godi.Provide(func() Database {
         return &RealDatabase{DSN: "mysql://localhost/prod"}
     }()),
-    godi.Lazy(func(c *godi.Container) (*UserService, error) {
+    godi.Build(func(c *godi.Container) (*UserService, error) {
         db, _ := godi.Inject[Database](c)
         return NewUserService(db), nil
     }),
@@ -52,7 +52,7 @@ testContainer.MustAdd(
     godi.Provide(func() Database {
         return &MockDatabase{Data: mockData}
     }()),
-    godi.Lazy(func(c *godi.Container) (*UserService, error) {
+    godi.Build(func(c *godi.Container) (*UserService, error) {
         db, _ := godi.Inject[Database](c)
         return NewUserService(db), nil
     }),

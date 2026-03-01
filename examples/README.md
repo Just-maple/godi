@@ -16,7 +16,7 @@ This directory contains examples demonstrating various features of the godi depe
 | [08-testing-mock](08-testing-mock/) | Testing with mocks | Interface-based testing, DI |
 | [09-web-app](09-web-app/) | Production web app | SOLID principles, DIP, layered architecture |
 | [10-lifecycle-cleanup](10-lifecycle-cleanup/) | Resource cleanup | Lifecycle hooks, graceful shutdown |
-| [11-chain](11-chain/) | Dependency transformation | Chain, Lazy, constructor injection |
+| [11-chain](11-chain/) | Dependency transformation | Chain, Build, constructor injection |
 
 ## Quick Start
 
@@ -41,10 +41,10 @@ c.Add(godi.Provide(MyService{}))
 service, ok := godi.Inject[MyService](c)
 ```
 
-### 2. Lazy Loading
+### 2. Build
 
 ```go
-c.Add(godi.Lazy(func() (*Database, error) {
+c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
     return ConnectDB("dsn")
 }))
 ```
@@ -65,7 +65,7 @@ See [09-web-app](09-web-app/) for production-ready example using interfaces:
 
 ```go
 // Register interface, not concrete type
-c.Add(godi.Lazy(func() (interfaces.Database, error) {
+c.Add(godi.Build(func(c *godi.Container) (interfaces.Database, error) {
     return infrastructure.NewDBConnection(dsn), nil
 }))
 
@@ -78,9 +78,9 @@ type Service struct {
 ## Best Practices
 
 1. **Use interfaces for cross-layer dependencies** (see 09-web-app)
-2. **Lazy load expensive resources** (database connections, etc.)
-3. **Use ShouldInject for recoverable errors**
-4. **Use MustInject for required dependencies**
+2. **Use Build for expensive resources** (database connections, etc.)
+3. **Use Add/Inject for recoverable errors**
+4. **Use MustAdd/MustInject for required dependencies**
 5. **Keep containers scoped** (one per application layer)
 
 ## Documentation

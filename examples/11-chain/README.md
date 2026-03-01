@@ -5,7 +5,7 @@ Demonstrates dependency transformation with Chain and constructor-based injectio
 ## What This Example Shows
 
 - Using `Chain` to transform dependencies
-- Combining Chain with Lazy for complex assembly
+- Combining Chain with Build for complex assembly
 - Creating dependency chains (Config → Database → Repository → Service)
 - Multiple independent chains in one container
 
@@ -44,17 +44,17 @@ func NewService(repo *Repository, name string) *Service {
     return &Service{Repo: repo, Name: name}
 }
 
-// Register with Chain and Lazy
+// Register with Chain and Build
 c.MustAdd(
     godi.Provide(Config{DSN: "mysql://localhost", AppName: "chain-app"}),
     godi.Chain(func(cfg Config) (*Database, error) {
         return &Database{ConnString: cfg.DSN, Connected: true}, nil
     }),
-    godi.Lazy(func(c *godi.Container) (*Repository, error) {
+    godi.Build(func(c *godi.Container) (*Repository, error) {
         db, _ := godi.Inject[*Database](c)
         return NewRepository(db), nil
     }),
-    godi.Lazy(func(c *godi.Container) (*Service, error) {
+    godi.Build(func(c *godi.Container) (*Service, error) {
         repo, _ := godi.Inject[*Repository](c)
         return NewService(repo, "UserService"), nil
     }),
@@ -116,9 +116,9 @@ Number chain: 10 -> 20
 String chain: prefix -> prefix-suffix
 ```
 
-## Chain vs Lazy
+## Chain vs Build
 
-| Feature | Chain | Lazy |
+| Feature | Chain | Build |
 |---------|-------|------|
 | Purpose | Transform existing dependency | Create new dependency |
 | Input | Single dependency type | Container reference |
@@ -127,4 +127,4 @@ String chain: prefix -> prefix-suffix
 ## When to Use
 
 - **Chain**: Transform config values, wrap dependencies, create derived types
-- **Lazy**: Complex assembly, multiple dependencies, conditional logic
+- **Build**: Complex assembly, multiple dependencies, conditional logic

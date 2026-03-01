@@ -33,7 +33,7 @@ func NewUserService(repo *InMemoryRepository[User]) *UserService {
 // Register with dependency injection
 c.MustAdd(
     godi.Provide(NewInMemoryRepository[User]()),
-    godi.Lazy(func(c *godi.Container) (*UserService, error) {
+    godi.Build(func(c *godi.Container) (*UserService, error) {
         repo, _ := godi.Inject[*InMemoryRepository[User]](c)
         return NewUserService(repo), nil
     }),

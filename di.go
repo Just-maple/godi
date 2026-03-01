@@ -71,7 +71,7 @@ func MustInject[T any](c ...*Container) T {
 	return v
 }
 
-func Lazy[T any](f func(*Container) (T, error)) Provider {
+func Build[T any](f func(*Container) (T, error)) Provider {
 	l := new(struct {
 		value T
 		once  sync.Once
@@ -87,7 +87,7 @@ func Lazy[T any](f func(*Container) (T, error)) Provider {
 }
 
 func Chain[R any, T any](f func(r R) (T, error)) Provider {
-	return Lazy(func(c *Container) (zero T, err error) {
+	return Build(func(c *Container) (zero T, err error) {
 		r, err := Inject[R](c)
 		if err != nil {
 			return zero, err

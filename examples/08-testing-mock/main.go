@@ -56,7 +56,7 @@ func main() {
 		godi.Provide(func() Database {
 			return &RealDatabase{DSN: "mysql://localhost/prod"}
 		}()),
-		godi.Lazy(func(c *godi.Container) (*UserService, error) {
+		godi.Build(func(c *godi.Container) (*UserService, error) {
 			db, err := godi.Inject[Database](c)
 			if err != nil {
 				return nil, err
@@ -76,7 +76,7 @@ func main() {
 		godi.Provide(func() Database {
 			return mockDB
 		}()),
-		godi.Lazy(func(c *godi.Container) (*UserService, error) {
+		godi.Build(func(c *godi.Container) (*UserService, error) {
 			db, err := godi.Inject[Database](c)
 			if err != nil {
 				return nil, err

@@ -60,14 +60,14 @@ func main() {
 	c.MustAdd(
 		godi.Provide(NewInMemoryRepository[User]()),
 		godi.Provide(NewInMemoryRepository[Product]()),
-		godi.Lazy(func(c *godi.Container) (*UserService, error) {
+		godi.Build(func(c *godi.Container) (*UserService, error) {
 			repo, err := godi.Inject[*InMemoryRepository[User]](c)
 			if err != nil {
 				return nil, err
 			}
 			return NewUserService(repo), nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*ProductService, error) {
+		godi.Build(func(c *godi.Container) (*ProductService, error) {
 			repo, err := godi.Inject[*InMemoryRepository[Product]](c)
 			if err != nil {
 				return nil, err

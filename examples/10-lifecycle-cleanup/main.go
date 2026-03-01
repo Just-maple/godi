@@ -124,7 +124,7 @@ func main() {
 
 	c.MustAdd(
 		godi.Provide(lifecycle),
-		godi.Lazy(func(c *godi.Container) (*Database, error) {
+		godi.Build(func(c *godi.Container) (*Database, error) {
 			db := &Database{name: "main-db"}
 			fmt.Printf("[Database] %s connected\n", db.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -132,7 +132,7 @@ func main() {
 			})
 			return db, nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*Cache, error) {
+		godi.Build(func(c *godi.Container) (*Cache, error) {
 			cache := &Cache{name: "redis-cache"}
 			fmt.Printf("[Cache] %s connected\n", cache.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -140,7 +140,7 @@ func main() {
 			})
 			return cache, nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*Service, error) {
+		godi.Build(func(c *godi.Container) (*Service, error) {
 			service := &Service{name: "user-service"}
 			fmt.Printf("[Service] %s initialized\n", service.name)
 			lifecycle.AddShutdownHook(func(ctx context.Context) error {
@@ -148,7 +148,7 @@ func main() {
 			})
 			return service, nil
 		}),
-		godi.Lazy(func(c *godi.Container) (*App, error) {
+		godi.Build(func(c *godi.Container) (*App, error) {
 			db, err := godi.Inject[*Database](c)
 			if err != nil {
 				return nil, err

@@ -351,6 +351,50 @@ func TestMustInjectTo(t *testing.T) {
 	}
 }
 
+func TestMustInjectAs(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func() *Container
+		injectFn  func(*Container)
+		wantPanic bool
+		wantVal   any
+	}{
+		{
+			name: "success",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) {
+				var db Database
+				MustInjectAs(&db, c)
+				if db.DSN != "mysql://localhost" {
+					t.Errorf("expected mysql://localhost, got %s", db.DSN)
+				}
+			},
+		},
+		{
+			name:      "panic on not found",
+			setup:     func() *Container { return &Container{} },
+			injectFn:  func(c *Container) { var db Database; MustInjectAs(&db, c) },
+			wantPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			defer func() {
+				if r := recover(); (r != nil) != tt.wantPanic {
+					t.Errorf("panic = %v, wantPanic %v", r != nil, tt.wantPanic)
+				}
+			}()
+			tt.injectFn(c)
+		})
+	}
+}
+
 func TestContainer_MustAdd(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -868,7 +912,7 @@ func TestMultiContainer(t *testing.T) {
 			name: "not found",
 			setup: func() ([]*Container, *Container) {
 				c1, c2 := &Container{}, &Container{}
-				c1.Add(Provide(Database{DSN: "db1"}))
+				c1.MustAdd(Provide(Database{DSN: "db1"}))
 				return []*Container{c1, c2}, nil
 			},
 			injectFn: func(cs []*Container) (any, error) {
@@ -1008,6 +1052,26 @@ func TestComplexScenarios(t *testing.T) {
 		age, err := Inject[Age](c2)
 		if err != nil || age != 3 {
 			t.Errorf("expected 3, got %v", age)
+		}
+	})
+
+	t.Run("ChainError", func(t *testing.T) {
+		type Name string
+		type Age int
+
+		c := &Container{}
+		c.MustAdd(
+			Build(func(container *Container) (Name, error) {
+				return "", fmt.Errorf("intentional error")
+			}),
+			Chain(func(n Name) (Age, error) {
+				return Age(len(n)), nil
+			}),
+		)
+
+		age, err := Inject[Age](c)
+		if err == nil || age != 0 {
+			t.Errorf("expected error, got %v", age)
 		}
 	})
 

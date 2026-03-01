@@ -30,7 +30,7 @@ func TestProvide(t *testing.T) {
 	p := Provide(db)
 
 	var got Database
-	if err := p.Inject(nil, &got); err != nil {
+	if err := p.inject(nil, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.DSN != db.DSN {

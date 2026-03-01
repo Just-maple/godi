@@ -70,13 +70,13 @@ c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
 ### 注入依赖
 
 ```go
-// Inject - 返回 (值，错误)
+// Inject - 返回类型化值和错误
 db, err := godi.Inject[*Database](c)
 
 // MustInject - 失败时 panic
 db := godi.MustInject[*Database](c)
 
-// InjectTo - 注入到现有变量
+// InjectTo - 注入到现有变量（泛型版本）
 var db Database
 err := godi.InjectTo(&db, c)
 
@@ -86,6 +86,9 @@ godi.MustInjectTo(&db, c)
 // InjectAs - 注入到现有变量（非泛型版本）
 db = Database{}
 err = godi.InjectAs(&db, c)
+
+// MustInjectAs - 非泛型版本，失败时 panic
+godi.MustInjectAs(&db, c)
 ```
 
 ### 多容器注入
@@ -94,7 +97,7 @@ err = godi.InjectAs(&db, c)
 db, err := godi.Inject[*Database](container1, container2, container3)
 ```
 
-按顺序查找，返回第一个匹配的依赖。
+按顺序查找容器，返回第一个匹配的依赖。
 
 ## 使用场景
 
@@ -201,25 +204,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. 生命周期管理
-
-```go
-lifecycle := NewLifecycle()
-c.MustAdd(godi.Provide(lifecycle))
-
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    db := NewDatabase(dsn)
-    lifecycle.AddShutdownHook(func(ctx context.Context) error {
-        return db.Close()
-    })
-    return db, nil
-}))
-
-// 应用退出时
-lifecycle.Shutdown(context.Background())
-```
-
-### 8. Chain 转换依赖
+### 7. Chain 转换依赖
 
 ```go
 type Name string

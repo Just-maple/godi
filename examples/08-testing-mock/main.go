@@ -53,9 +53,7 @@ func main() {
 	// Production configuration
 	prodContainer := &godi.Container{}
 	prodContainer.MustAdd(
-		godi.Provide(func() Database {
-			return &RealDatabase{DSN: "mysql://localhost/prod"}
-		}()),
+		godi.Provide[Database](&RealDatabase{DSN: "mysql://localhost/prod"}),
 		godi.Build(func(c *godi.Container) (*UserService, error) {
 			db, err := godi.Inject[Database](c)
 			if err != nil {
@@ -73,9 +71,7 @@ func main() {
 		},
 	}
 	testContainer.MustAdd(
-		godi.Provide(func() Database {
-			return mockDB
-		}()),
+		godi.Provide[Database](mockDB),
 		godi.Build(func(c *godi.Container) (*UserService, error) {
 			db, err := godi.Inject[Database](c)
 			if err != nil {

@@ -8,7 +8,6 @@ import (
 
 // Chain Example: Demonstrates dependency transformation with Chain
 // Chain creates a new provider by transforming an existing dependency
-// No need to pass Container - it's automatically available in Lazy!
 
 type Config struct {
 	DSN     string

@@ -70,22 +70,25 @@ c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
 ### Inject Dependencies
 
 ```go
-// Inject - Returns (value, error)
+// Inject - Returns typed value and error
 db, err := godi.Inject[*Database](c)
 
 // MustInject - Panics on failure
 db := godi.MustInject[*Database](c)
 
-// InjectTo - Inject into existing variable
+// InjectTo - Inject into existing variable (generic)
 var db Database
 err := godi.InjectTo(&db, c)
 
 // MustInjectTo - Inject into existing variable, panics on failure
 godi.MustInjectTo(&db, c)
 
-// InjectAs - Inject into existing variable (non-generic version)
+// InjectAs - Inject into existing variable (non-generic)
 db = Database{}
 err = godi.InjectAs(&db, c)
+
+// MustInjectAs - Non-generic version with panic
+godi.MustInjectAs(&db, c)
 ```
 
 ### Multi-Container Injection
@@ -201,25 +204,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. Lifecycle Management
-
-```go
-lifecycle := NewLifecycle()
-c.MustAdd(godi.Provide(lifecycle))
-
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    db := NewDatabase(dsn)
-    lifecycle.AddShutdownHook(func(ctx context.Context) error {
-        return db.Close()
-    })
-    return db, nil
-}))
-
-// On application exit
-lifecycle.Shutdown(context.Background())
-```
-
-### 8. Chain - Transform Dependencies
+### 7. Chain - Transform Dependencies
 
 ```go
 type Name string

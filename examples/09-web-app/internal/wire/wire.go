@@ -28,7 +28,7 @@ func NewAppContainer() *godi.Container {
 	appLifecycle := lifecycle.New("WebApp")
 
 	// Register Config (concrete type - no interface needed for config)
-	// Register Infrastructure (Lazy loading with cleanup hooks)
+	// Register Infrastructure (Build with cleanup hooks)
 	// Note: We register concrete types but depend on interfaces in upper layers
 	c.MustAdd(
 		godi.Provide(appLifecycle),
@@ -132,7 +132,7 @@ func NewAppContainer() *godi.Container {
 // Run starts the application and handles graceful shutdown
 func Run() error {
 	container := NewAppContainer()
-	fmt.Println("✓ Container created (Lazy loading)")
+	fmt.Println("✓ Container created")
 	fmt.Println("✓ Using Dependency Inversion Principle")
 	fmt.Println("✓ Lifecycle hooks registered")
 

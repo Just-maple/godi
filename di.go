@@ -45,8 +45,7 @@ func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	for _, c := range cs {
 		if _, on := c.injecting.LoadOrStore(id, true); on {
 			return fmt.Errorf("circular dependency for %T", v)
-		}
-		if p, ok := c.providers.Load(id); ok {
+		} else if p, ok := c.providers.Load(id); ok {
 			err = p.(Provider).inject(c, v)
 			c.injecting.Delete(id)
 			return
@@ -74,8 +73,8 @@ func MustInject[T any](c ...*Container) T {
 
 func Lazy[T any](f func(*Container) (T, error)) Provider {
 	l := new(struct {
-		once  sync.Once
 		value T
+		once  sync.Once
 		err   error
 	})
 	return prov[T](func(c *Container, ptr any) error {
@@ -88,10 +87,10 @@ func Lazy[T any](f func(*Container) (T, error)) Provider {
 }
 
 func Chain[R any, T any](f func(r R) (T, error)) Provider {
-	return Lazy(func(c *Container) (zero T, _ error) {
+	return Lazy(func(c *Container) (zero T, err error) {
 		r, err := Inject[R](c)
 		if err != nil {
-			return
+			return zero, err
 		}
 		return f(r)
 	})

@@ -8,15 +8,17 @@ import (
 type Provider interface {
 	inject(*Container, any) error
 	ID() any
+	Is(any) bool
 }
 
-type prov[T any] func(*Container, any) error
+type provider[T any] func(*Container, any) error
 
-func (p prov[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
-func (p prov[T]) ID() any                            { return (*T)(nil) }
+func (p provider[T]) Is(a any) bool                      { _, ok := a.(*T); return ok }
+func (p provider[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
+func (p provider[T]) ID() any                            { return (*T)(nil) }
 
 func Provide[T any](v T) Provider {
-	return prov[T](func(_ *Container, dst any) error { *dst.(*T) = v; return nil })
+	return provider[T](func(_ *Container, p any) error { *p.(*T) = v; return nil })
 }
 
 type Container struct{ providers, injecting sync.Map }
@@ -40,17 +42,36 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 	return c
 }
 
+func (c *Container) inject(provider Provider, id, v any) (err error) {
+	if _, on := c.injecting.LoadOrStore(id, true); on {
+		return fmt.Errorf("circular dependency for %T", v)
+	}
+	err = provider.inject(c, v)
+	c.injecting.Delete(id)
+	return
+}
+
+func InjectAs(v any, cs ...*Container) (err error) {
+	for _, c := range cs {
+		if c.providers.Range(func(id, p interface{}) bool {
+			if pv := p.(Provider); pv.Is(v) {
+				err = c.inject(pv, id, v)
+				v = nil
+			}
+			return v != nil
+		}); v == nil {
+			return
+		}
+	}
+	return fmt.Errorf("provider %T not found", v)
+}
+
 func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	id := (*T)(nil)
 	for _, c := range cs {
-		if _, on := c.injecting.LoadOrStore(id, true); on {
-			return fmt.Errorf("circular dependency for %T", v)
-		} else if p, ok := c.providers.Load(id); ok {
-			err = p.(Provider).inject(c, v)
-			c.injecting.Delete(id)
-			return
+		if p, ok := c.providers.Load(id); ok {
+			return c.inject(p.(Provider), id, v)
 		}
-		c.injecting.Delete(id)
 	}
 	return fmt.Errorf("provider %T not found", v)
 }
@@ -77,7 +98,7 @@ func Build[T any](f func(*Container) (T, error)) Provider {
 		once  sync.Once
 		err   error
 	})
-	return prov[T](func(c *Container, ptr any) error {
+	return provider[T](func(c *Container, ptr any) error {
 		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
 			return fmt.Errorf("create %T error: %w", l.value, l.err)
 		}

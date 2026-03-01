@@ -82,6 +82,10 @@ err := godi.InjectTo(&db, c)
 
 // MustInjectTo - Inject into existing variable, panics on failure
 godi.MustInjectTo(&db, c)
+
+// InjectAs - Inject into existing variable (non-generic version)
+db = Database{}
+err = godi.InjectAs(&db, c)
 ```
 
 ### Multi-Container Injection

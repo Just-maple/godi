@@ -82,6 +82,10 @@ err := godi.InjectTo(&db, c)
 
 // MustInjectTo - 注入到现有变量，失败时 panic
 godi.MustInjectTo(&db, c)
+
+// InjectAs - 注入到现有变量（非泛型版本）
+db = Database{}
+err = godi.InjectAs(&db, c)
 ```
 
 ### 多容器注入

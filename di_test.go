@@ -111,6 +111,19 @@ func TestInjectTo(t *testing.T) {
 	}
 }
 
+func TestInjectAs(t *testing.T) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
+
+	db := Database{}
+	if err := InjectAs(&db, c); err != nil {
+		t.Fatal(err)
+	}
+	if db.DSN != "mysql://localhost:3306/test" {
+		t.Errorf("expected mysql://localhost:3306/test, got %s", db.DSN)
+	}
+}
+
 func TestInjectTo_ErrorCases(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		var db Database
@@ -123,6 +136,23 @@ func TestInjectTo_ErrorCases(t *testing.T) {
 		c.MustAdd(Provide(Database{DSN: "test"}))
 		var cfg Config
 		if err := InjectTo(&cfg, c); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestInjectAs_ErrorCases(t *testing.T) {
+	t.Run("not found", func(t *testing.T) {
+		db := Database{}
+		if err := InjectAs(&db, &Container{}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+	t.Run("wrong type", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "test"}))
+		cfg := Config{}
+		if err := InjectAs(&cfg, c); err == nil {
 			t.Fatal("expected error")
 		}
 	})
@@ -469,6 +499,22 @@ func TestMultiContainer_InjectTo(t *testing.T) {
 	}
 }
 
+func TestMultiContainer_InjectAs(t *testing.T) {
+	c1, c2 := &Container{}, &Container{}
+	c1.MustAdd(Provide(Database{DSN: "db1"}))
+	c2.MustAdd(Provide(Config{AppName: "app2"}))
+
+	db := Database{}
+	if err := InjectAs(&db, c1, c2); err != nil || db.DSN != "db1" {
+		t.Errorf("expected db1, got %v", db)
+	}
+
+	cfg := Config{}
+	if err := InjectAs(&cfg, c1, c2); err != nil || cfg.AppName != "app2" {
+		t.Errorf("expected app2, got %v", cfg)
+	}
+}
+
 func TestMultiContainer_NotFound(t *testing.T) {
 	c1, c2 := &Container{}, &Container{}
 	c1.Add(Provide(Database{DSN: "db1"}))
@@ -670,6 +716,16 @@ func ExampleInjectTo() {
 	// Output: Injected: true, DSN: mysql://localhost
 }
 
+func ExampleInjectAs() {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+
+	db := Database{}
+	err := InjectAs(&db, c)
+	fmt.Printf("Injected: %v, DSN: %s\n", err == nil, db.DSN)
+	// Output: Injected: true, DSN: mysql://localhost
+}
+
 func ExampleMultiContainer() {
 	c1, c2 := &Container{}, &Container{}
 	c1.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
@@ -700,6 +756,17 @@ func BenchmarkInjectTo(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = InjectTo(&db, c)
+	}
+}
+
+func BenchmarkInjectAs(b *testing.B) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "test"}))
+	db := Database{}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = InjectAs(&db, c)
 	}
 }
 

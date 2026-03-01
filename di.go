@@ -79,6 +79,15 @@ func (c *Container) inject(provider Provider, id, v any) (err error) {
 	return provider.inject(c, v)
 }
 
+func (c *Container) Inject(ps ...any) error {
+	for _, p := range ps {
+		if e := InjectAs(p, c); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func InjectAs(v any, cs ...*Container) (err error) {
 	for _, c := range cs {
 		if c.providers.Range(func(id, p interface{}) bool {

@@ -89,6 +89,10 @@ err = godi.InjectAs(&db, c)
 
 // MustInjectAs - 非泛型版本，失败时 panic
 godi.MustInjectAs(&db, c)
+
+// Container.Inject - 一次性注入多个依赖
+service := &Service{}
+err = c.Inject(&service.DB, &service.Config, &service.Cache)
 ```
 
 ### 多容器注入
@@ -101,7 +105,28 @@ db, err := godi.Inject[*Database](container1, container2, container3)
 
 ## 使用场景
 
-### 1. 基础注入
+### 1. 结构体字段注入
+
+```go
+type Service struct {
+    DB     Database
+    Config Config
+    Cache  Cache
+}
+
+c := &godi.Container{}
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+)
+
+// 直接注入到结构体字段
+service := &Service{}
+err := c.Inject(&service.DB, &service.Config, &service.Cache)
+```
+
+### 2. 基础注入
 
 ```go
 c := &godi.Container{}
@@ -113,7 +138,7 @@ c.MustAdd(
 cfg, err := godi.Inject[Config](c)
 ```
 
-### 2. 懒加载
+### 3. 懒加载
 
 工厂函数仅在首次请求时执行，结果缓存：
 
@@ -127,7 +152,7 @@ c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
 db, err := godi.Inject[*Database](c)
 ```
 
-### 3. 依赖链
+### 4. 依赖链
 
 ```go
 c.MustAdd(
@@ -152,7 +177,7 @@ c.MustAdd(
 svc := godi.MustInject[*UserService](c)
 ```
 
-### 4. 循环依赖检测
+### 5. 循环依赖检测
 
 ```go
 type A struct{ B *B }
@@ -173,7 +198,7 @@ c.MustAdd(
 _, err := godi.Inject[A](c)
 ```
 
-### 5. 接口注入
+### 6. 接口注入
 
 ```go
 type Database interface {
@@ -187,7 +212,7 @@ c.Add(godi.Build(func(c *godi.Container) (Database, error) {
 db, err := godi.Inject[Database](c)
 ```
 
-### 6. 测试 Mock
+### 7. 测试 Mock
 
 ```go
 // 生产环境
@@ -204,7 +229,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. Chain 转换依赖
+### 8. Chain 转换依赖
 
 ```go
 type Name string
@@ -263,6 +288,7 @@ go func() {
 | [09-web-app](examples/09-web-app/) | Web 应用最佳实践 |
 | [10-lifecycle-cleanup](examples/10-lifecycle-cleanup/) | 生命周期管理 |
 | [11-chain](examples/11-chain/) | 依赖转换 |
+| [12-struct-field-inject](examples/12-struct-field-inject/) | 结构体字段注入 |
 
 ## 与其他框架对比
 

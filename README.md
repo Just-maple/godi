@@ -89,6 +89,10 @@ err = godi.InjectAs(&db, c)
 
 // MustInjectAs - Non-generic version with panic
 godi.MustInjectAs(&db, c)
+
+// Container.Inject - Inject multiple dependencies at once
+service := &Service{}
+err = c.Inject(&service.DB, &service.Config, &service.Cache)
 ```
 
 ### Multi-Container Injection
@@ -101,7 +105,28 @@ Searches containers in order, returns first match.
 
 ## Usage Examples
 
-### 1. Basic Injection
+### 1. Struct Field Injection
+
+```go
+type Service struct {
+    DB     Database
+    Config Config
+    Cache  Cache
+}
+
+c := &godi.Container{}
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+)
+
+// Inject directly into struct fields
+service := &Service{}
+err := c.Inject(&service.DB, &service.Config, &service.Cache)
+```
+
+### 2. Basic Injection
 
 ```go
 c := &godi.Container{}
@@ -113,7 +138,7 @@ c.MustAdd(
 cfg, err := godi.Inject[Config](c)
 ```
 
-### 2. Lazy Loading
+### 3. Lazy Loading
 
 Factory executes only on first request, result is cached:
 
@@ -127,7 +152,7 @@ c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
 db, err := godi.Inject[*Database](c)
 ```
 
-### 3. Dependency Chains
+### 4. Dependency Chains
 
 ```go
 c.MustAdd(
@@ -152,7 +177,7 @@ c.MustAdd(
 svc := godi.MustInject[*UserService](c)
 ```
 
-### 4. Circular Dependency Detection
+### 5. Circular Dependency Detection
 
 ```go
 type A struct{ B *B }
@@ -173,7 +198,7 @@ c.MustAdd(
 _, err := godi.Inject[A](c)
 ```
 
-### 5. Interface Injection
+### 6. Interface Injection
 
 ```go
 type Database interface {
@@ -187,7 +212,7 @@ c.Add(godi.Build(func(c *godi.Container) (Database, error) {
 db, err := godi.Inject[Database](c)
 ```
 
-### 6. Testing with Mocks
+### 7. Testing with Mocks
 
 ```go
 // Production
@@ -204,7 +229,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. Chain - Transform Dependencies
+### 8. Chain - Transform Dependencies
 
 ```go
 type Name string
@@ -263,6 +288,7 @@ See [examples/](examples/) for complete examples:
 | [09-web-app](examples/09-web-app/) | Web app best practices |
 | [10-lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Lifecycle management |
 | [11-chain](examples/11-chain/) | Dependency transformation |
+| [12-struct-field-inject](examples/12-struct-field-inject/) | Struct field injection |
 
 ## Comparison with Other Frameworks
 

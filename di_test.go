@@ -264,6 +264,81 @@ func TestInject_ErrorCases(t *testing.T) {
 	}
 }
 
+func TestContainer_Inject(t *testing.T) {
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) error
+		wantErr  bool
+	}{
+		{
+			name: "single dependency",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				db := Database{}
+				return c.Inject(&db)
+			},
+		},
+		{
+			name: "multiple dependencies",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(Database{DSN: "mysql://localhost"}),
+					Provide(Config{AppName: "test-app"}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) error {
+				db := Database{}
+				cfg := Config{}
+				return c.Inject(&db, &cfg)
+			},
+		},
+		{
+			name: "not found error",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				cfg := Config{}
+				return c.Inject(&cfg)
+			},
+			wantErr: true,
+		},
+		{
+			name: "partial error",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+				return c
+			},
+			injectFn: func(c *Container) error {
+				db := Database{}
+				cfg := Config{}
+				return c.Inject(&db, &cfg)
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			err := tt.injectFn(c)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestMustInject(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1158,6 +1233,20 @@ func ExampleInjectAs() {
 	err := InjectAs(&db, c)
 	fmt.Printf("Injected: %v, DSN: %s\n", err == nil, db.DSN)
 	// Output: Injected: true, DSN: mysql://localhost
+}
+
+func ExampleContainer_Inject() {
+	c := &Container{}
+	c.MustAdd(
+		Provide(Database{DSN: "mysql://localhost"}),
+		Provide(Config{AppName: "my-app"}),
+	)
+
+	var db Database
+	var cfg Config
+	err := c.Inject(&db, &cfg)
+	fmt.Printf("Injected: %v, DB: %s, App: %s\n", err == nil, db.DSN, cfg.AppName)
+	// Output: Injected: true, DB: mysql://localhost, App: my-app
 }
 
 func ExampleMultiContainer() {

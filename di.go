@@ -21,6 +21,31 @@ func Provide[T any](v T) Provider {
 	return provider[T](func(_ *Container, p any) error { *p.(*T) = v; return nil })
 }
 
+func Build[T any](f func(*Container) (T, error)) Provider {
+	l := new(struct {
+		value T
+		once  sync.Once
+		err   error
+	})
+	return provider[T](func(c *Container, ptr any) error {
+		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
+			return fmt.Errorf("create %T error: %w", l.value, l.err)
+		}
+		*ptr.(*T) = l.value
+		return nil
+	})
+}
+
+func Chain[R any, T any](f func(r R) (T, error)) Provider {
+	return Build(func(c *Container) (zero T, err error) {
+		r, err := Inject[R](c)
+		if err != nil {
+			return zero, err
+		}
+		return f(r)
+	})
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
@@ -70,8 +95,6 @@ func InjectAs(v any, cs ...*Container) (err error) {
 	return fmt.Errorf("provider %T not found", v)
 }
 
-func MustInjectAs(v any, c ...*Container) { must(InjectAs(v, c...)) }
-
 func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	id := (*T)(nil)
 	for _, c := range cs {
@@ -82,37 +105,7 @@ func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	return fmt.Errorf("provider %T not found", v)
 }
 
-func MustInjectTo[T any](v *T, c ...*Container) { must(InjectTo(v, c...)) }
-
+func MustInjectAs(v any, c ...*Container)          { must(InjectAs(v, c...)) }
+func MustInjectTo[T any](v *T, c ...*Container)    { must(InjectTo(v, c...)) }
 func Inject[T any](c ...*Container) (v T, _ error) { return v, InjectTo(&v, c...) }
-
-func MustInject[T any](c ...*Container) T {
-	v, e := Inject[T](c...)
-	must(e)
-	return v
-}
-
-func Build[T any](f func(*Container) (T, error)) Provider {
-	l := new(struct {
-		value T
-		once  sync.Once
-		err   error
-	})
-	return provider[T](func(c *Container, ptr any) error {
-		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
-			return fmt.Errorf("create %T error: %w", l.value, l.err)
-		}
-		*ptr.(*T) = l.value
-		return nil
-	})
-}
-
-func Chain[R any, T any](f func(r R) (T, error)) Provider {
-	return Build(func(c *Container) (zero T, err error) {
-		r, err := Inject[R](c)
-		if err != nil {
-			return zero, err
-		}
-		return f(r)
-	})
-}
+func MustInject[T any](c ...*Container) (v T)      { MustInjectTo[T](&v, c...); return }

@@ -29,21 +29,17 @@ func Provide[T any](v T) Provider {
 }
 
 type Container struct {
-	providers []Provider
-	mu        sync.Mutex
+	providers sync.Map
 	injecting sync.Map
 }
 
 func (c *Container) Add(ps ...Provider) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, p := range ps {
-		for _, pv := range c.providers {
-			if id := p.ID(); pv.ID() == id {
-				return fmt.Errorf("provider %T already exists", id)
-			}
+		id := p.ID()
+		if _, exists := c.providers.Load(id); exists {
+			return fmt.Errorf("provider %T already exists", id)
 		}
-		c.providers = append(c.providers, p)
+		c.providers.Store(id, p)
 	}
 	return nil
 }
@@ -57,23 +53,22 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 	return c
 }
 
-func InjectTo[T any](v *T, cs ...*Container) error {
+func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	id := (*T)(nil)
 	for _, c := range cs {
-		if _, on := c.injecting.Load(id); on {
-			return fmt.Errorf("circular dependency for %T", v)
-		}
-		c.injecting.Store(id, true)
-		c.mu.Lock()
-		ps := c.providers
-		c.mu.Unlock()
-		for _, p := range ps {
-			if err := p.Inject(c, v); err == nil || !errors.Is(err, errTypeMismatch) {
-				c.injecting.Delete(id)
-				return err
+		if _, found := c.injecting.Load(id); !found {
+			c.injecting.Store(id, true)
+			c.providers.Range(func(key, value any) bool {
+				err = value.(Provider).Inject(c, v)
+				found = err == nil || !errors.Is(err, errTypeMismatch)
+				return !found
+			})
+			if c.injecting.Delete(id); !found {
+				continue
 			}
+			return err
 		}
-		c.injecting.Delete(id)
+		return fmt.Errorf("circular dependency for %T", v)
 	}
 	return fmt.Errorf("provider %T not found", v)
 }

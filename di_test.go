@@ -14,6 +14,17 @@ type Service struct {
 	Cfg  Config
 }
 
+type bench0 struct{ Val int }
+type bench1 struct{ Val int }
+type bench2 struct{ Val int }
+type bench3 struct{ Val int }
+type bench4 struct{ Val int }
+type bench5 struct{ Val int }
+type bench6 struct{ Val int }
+type bench7 struct{ Val int }
+type bench8 struct{ Val int }
+type bench9 struct{ Val int }
+
 func TestProvide(t *testing.T) {
 	db := Database{DSN: "mysql://localhost"}
 	p := Provide(db)
@@ -669,4 +680,61 @@ func ExampleMultiContainer() {
 
 	fmt.Printf("DB: %s, App: %s\n", db.DSN, cfg.AppName)
 	// Output: DB: mysql://localhost, App: multi-app
+}
+
+func BenchmarkInject(b *testing.B) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "test"}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = Inject[Database](c)
+	}
+}
+
+func BenchmarkInjectTo(b *testing.B) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "test"}))
+	var db Database
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = InjectTo(&db, c)
+	}
+}
+
+func BenchmarkContainer_Add(b *testing.B) {
+	for _, n := range []int{10} {
+		b.Run(fmt.Sprintf("Providers%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				c := &Container{}
+				for j := 0; j < n; j++ {
+					switch j % 10 {
+					case 0:
+						c.MustAdd(Provide(bench0{j}))
+					case 1:
+						c.MustAdd(Provide(bench1{j}))
+					case 2:
+						c.MustAdd(Provide(bench2{j}))
+					case 3:
+						c.MustAdd(Provide(bench3{j}))
+					case 4:
+						c.MustAdd(Provide(bench4{j}))
+					case 5:
+						c.MustAdd(Provide(bench5{j}))
+					case 6:
+						c.MustAdd(Provide(bench6{j}))
+					case 7:
+						c.MustAdd(Provide(bench7{j}))
+					case 8:
+						c.MustAdd(Provide(bench8{j}))
+					case 9:
+						c.MustAdd(Provide(bench9{j}))
+					}
+				}
+			}
+		})
+	}
 }

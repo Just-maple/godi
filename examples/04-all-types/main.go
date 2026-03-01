@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/Just-maple/godi"
 )
 
@@ -76,17 +77,17 @@ func main() {
 	c.MustAdd(godi.Provide(any("interface value")))
 
 	// Inject and verify
-	str, _ := godi.Inject[string](c)
-	num, _ := godi.Inject[int](c)
-	f32, _ := godi.Inject[float32](c)
-	f64, _ := godi.Inject[float64](c)
-	boolean, _ := godi.Inject[bool](c)
-	strSlice, _ := godi.Inject[[]string](c)
-	intMap, _ := godi.Inject[map[string]int](c)
-	arr, _ := godi.Inject[[3]int](c)
-	user, _ := godi.Inject[*User](c)
-	config, _ := godi.Inject[Config](c)
-	fn, _ := godi.Inject[func() string](c)
+	str := godi.MustInject[string](c)
+	num := godi.MustInject[int](c)
+	f32 := godi.MustInject[float32](c)
+	f64 := godi.MustInject[float64](c)
+	boolean := godi.MustInject[bool](c)
+	strSlice := godi.MustInject[[]string](c)
+	intMap := godi.MustInject[map[string]int](c)
+	arr := godi.MustInject[[3]int](c)
+	user := godi.MustInject[*User](c)
+	config := godi.MustInject[Config](c)
+	fn := godi.MustInject[func() string](c)
 
 	fmt.Printf("String: %s\n", str)
 	fmt.Printf("Number: %d\n", num)

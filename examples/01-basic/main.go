@@ -22,7 +22,7 @@ func main() {
 	c := &godi.Container{}
 
 	// Register multiple dependencies at once
-	c.Add(
+	c.MustAdd(
 		godi.Provide(Database{DSN: "mysql://localhost:3306/mydb"}),
 		godi.Provide(Config{AppName: "my-app"}),
 	)

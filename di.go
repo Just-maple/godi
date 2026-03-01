@@ -21,6 +21,12 @@ func Provide[T any](v T) Provider {
 	return provider[T](func(_ *Container, p any) error { *p.(*T) = v; return nil })
 }
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 type Container struct{ providers, injecting sync.Map }
 
 func (c *Container) Add(ps ...Provider) error {
@@ -35,9 +41,7 @@ func (c *Container) Add(ps ...Provider) error {
 
 func (c *Container) MustAdd(ps ...Provider) *Container {
 	for _, p := range ps {
-		if err := c.Add(p); err != nil {
-			panic(err)
-		}
+		must(c.Add(p))
 	}
 	return c
 }
@@ -66,6 +70,8 @@ func InjectAs(v any, cs ...*Container) (err error) {
 	return fmt.Errorf("provider %T not found", v)
 }
 
+func MustInjectAs(v any, c ...*Container) { must(InjectAs(v, c...)) }
+
 func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	id := (*T)(nil)
 	for _, c := range cs {
@@ -76,19 +82,13 @@ func InjectTo[T any](v *T, cs ...*Container) (err error) {
 	return fmt.Errorf("provider %T not found", v)
 }
 
-func MustInjectTo[T any](v *T, c ...*Container) {
-	if e := InjectTo(v, c...); e != nil {
-		panic(e)
-	}
-}
+func MustInjectTo[T any](v *T, c ...*Container) { must(InjectTo(v, c...)) }
 
 func Inject[T any](c ...*Container) (v T, _ error) { return v, InjectTo(&v, c...) }
 
 func MustInject[T any](c ...*Container) T {
 	v, e := Inject[T](c...)
-	if e != nil {
-		panic(e)
-	}
+	must(e)
 	return v
 }
 

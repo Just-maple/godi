@@ -99,16 +99,24 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 	return c
 }
 
+func (c *Container) copy() *Container {
+	nc := &Container{}
+	cp := func(d, s *sync.Map) { s.Range(func(k, v interface{}) bool { d.Store(k, v); return true }) }
+	cp(&nc.injecting, &c.injecting)
+	cp(&nc.providers, &c.providers)
+	cp(&nc.hooks, &c.hooks)
+	return nc
+}
+
 func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
-	cp := &Container{providers: c.providers, hooks: c.hooks}
-	c.injecting.Range(func(key, value any) bool { cp.injecting.Store(key, value); return true })
-	if _, on := cp.injecting.LoadOrStore(id, ptr); on {
+	if _, on := c.injecting.Load(id); on {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
 	}
-	if v, err = p.inject(cp, ptr); err == nil {
-		cp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
+	nc := c.copy()
+	nc.injecting.Store(id, ptr)
+	if v, err = p.inject(nc, ptr); err == nil {
+		nc.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
-	cp.injecting.Delete(id)
 	return
 }
 

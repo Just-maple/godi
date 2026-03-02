@@ -3,9 +3,9 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/Just-maple/godi.svg)](https://pkg.go.dev/github.com/Just-maple/godi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Just-maple/godi)](https://goreportcard.com/report/github.com/Just-maple/godi)
 [![Test](https://github.com/Just-maple/godi/actions/workflows/test.yml/badge.svg)](https://github.com/Just-maple/godi/actions/workflows/test.yml)
-[![codecov](https://codecov.io/gh/Just-maple/godi/branch/main/graph/badge.svg)](https://codecov.io/gh/Just-maple/godi)
+[![codecov](https://codecov.io/gh/Just-maple/godi/branch/master/graph/badge.svg)](https://codecov.io/gh/Just-maple/godi)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/Just-maple/godi)](https://github.com/Just-maple/godi)
-[![License](https://img.shields.io/github/license/Just-maple/godi)](https://github.com/Just-maple/godi/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/Just-maple/godi)](https://github.com/Just-maple/godi/blob/master/LICENSE)
 
 Lightweight Go dependency injection framework built on generics. Zero reflection, zero code generation.
 

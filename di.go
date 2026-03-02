@@ -80,7 +80,7 @@ func (c *Container) inject(_ *Container, v any) (value any, err error) {
 
 func (c *Container) Add(ps ...Provider) error {
 	if parent, exist := c.injecting.Load(c); exist {
-		return fmt.Errorf("container is frozen: already provided to container %p", parent)
+		return fmt.Errorf("container frozen: already provided to %T %p", parent, parent)
 	}
 	for _, p := range ps {
 		id := p.ID()

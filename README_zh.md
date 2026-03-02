@@ -375,7 +375,7 @@ child.MustAdd(godi.Provide(Config{Value: "child"}))
 parent := &godi.Container{}
 parent.MustAdd(child)  // child 现在被冻结
 
-// 这会失败："container frozen cause added as provider"
+// 这会失败："container is frozen: already provided to container"
 err := child.Add(godi.Provide(struct{ Name string }{Name: "new"}))
 ```
 

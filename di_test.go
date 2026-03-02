@@ -2218,6 +2218,7 @@ func TestNestedContainer_ContainerFreezing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected container frozen error")
 	}
+	t.Log(err)
 }
 
 func TestNestedContainer_DuplicatePrevention(t *testing.T) {

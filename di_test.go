@@ -1217,7 +1217,7 @@ func TestHook(t *testing.T) {
 		t.Errorf("expected startupCalled=2, got %d", startupCalled)
 	}
 
-	shutdown.Iterate(ctx, false)
+	shutdown.Iterate(ctx, true)
 
 	if shutdownCalled != 2 {
 		t.Errorf("expected shutdownCalled=2, got %d", shutdownCalled)

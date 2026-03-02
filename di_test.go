@@ -881,144 +881,6 @@ func TestCircularDependency(t *testing.T) {
 	}
 }
 
-func TestMultiContainer(t *testing.T) {
-	tests := []struct {
-		name     string
-		setup    func() ([]*Container, *Container)
-		injectFn func([]*Container) (any, error)
-		wantVal  any
-	}{
-		{
-			name: "Database from c1",
-			setup: func() ([]*Container, *Container) {
-				c1, c2, c3 := &Container{}, &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				c3.MustAdd(Provide(Service{Name: "svc3"}))
-				return []*Container{c1, c2, c3}, c1
-			},
-			injectFn: func(cs []*Container) (any, error) { return Inject[Database](cs...) },
-			wantVal:  Database{DSN: "db1"},
-		},
-		{
-			name: "Config from c2",
-			setup: func() ([]*Container, *Container) {
-				c1, c2, c3 := &Container{}, &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				c3.MustAdd(Provide(Service{Name: "svc3"}))
-				return []*Container{c1, c2, c3}, c2
-			},
-			injectFn: func(cs []*Container) (any, error) { return Inject[Config](cs...) },
-			wantVal:  Config{AppName: "app2"},
-		},
-		{
-			name: "Service from c3",
-			setup: func() ([]*Container, *Container) {
-				c1, c2, c3 := &Container{}, &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				c3.MustAdd(Provide(Service{Name: "svc3"}))
-				return []*Container{c1, c2, c3}, c3
-			},
-			injectFn: func(cs []*Container) (any, error) { return Inject[Service](cs...) },
-			wantVal:  Service{Name: "svc3"},
-		},
-		{
-			name: "InjectTo Database",
-			setup: func() ([]*Container, *Container) {
-				c1, c2 := &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				return []*Container{c1, c2}, c1
-			},
-			injectFn: func(cs []*Container) (any, error) {
-				var db Database
-				err := InjectTo(&db, cs...)
-				return db, err
-			},
-			wantVal: Database{DSN: "db1"},
-		},
-		{
-			name: "InjectTo Config",
-			setup: func() ([]*Container, *Container) {
-				c1, c2 := &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				return []*Container{c1, c2}, c2
-			},
-			injectFn: func(cs []*Container) (any, error) {
-				var cfg Config
-				err := InjectTo(&cfg, cs...)
-				return cfg, err
-			},
-			wantVal: Config{AppName: "app2"},
-		},
-		{
-			name: "InjectAs Database",
-			setup: func() ([]*Container, *Container) {
-				c1, c2 := &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				return []*Container{c1, c2}, c1
-			},
-			injectFn: func(cs []*Container) (any, error) {
-				db := Database{}
-				err := InjectAs(&db, cs...)
-				return db, err
-			},
-			wantVal: Database{DSN: "db1"},
-		},
-		{
-			name: "InjectAs Config",
-			setup: func() ([]*Container, *Container) {
-				c1, c2 := &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				c2.MustAdd(Provide(Config{AppName: "app2"}))
-				return []*Container{c1, c2}, c2
-			},
-			injectFn: func(cs []*Container) (any, error) {
-				cfg := Config{}
-				err := InjectAs(&cfg, cs...)
-				return cfg, err
-			},
-			wantVal: Config{AppName: "app2"},
-		},
-		{
-			name: "not found",
-			setup: func() ([]*Container, *Container) {
-				c1, c2 := &Container{}, &Container{}
-				c1.MustAdd(Provide(Database{DSN: "db1"}))
-				return []*Container{c1, c2}, nil
-			},
-			injectFn: func(cs []*Container) (any, error) {
-				_, err := Inject[Config](cs...)
-				return nil, err
-			},
-			wantVal: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cs, _ := tt.setup()
-			got, err := tt.injectFn(cs)
-			if tt.wantVal == nil {
-				if err == nil {
-					t.Error("expected error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.wantVal {
-				t.Errorf("got %v, want %v", got, tt.wantVal)
-			}
-		})
-	}
-}
-
 func TestBuildWithError(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(
@@ -1109,25 +971,6 @@ func TestComplexScenarios(t *testing.T) {
 		v, err := Inject[L2](c)
 		if err != nil || v != 20 {
 			t.Errorf("expected 20, got %v", v)
-		}
-	})
-
-	t.Run("ChainMultiContainer", func(t *testing.T) {
-		type Name string
-		type Age int
-
-		c1, c2 := &Container{}, &Container{}
-		c1.MustAdd(Provide(Name("Alice")))
-		c2.MustAdd(
-			Provide(Name("Bob")),
-			Chain(func(n Name) (Age, error) {
-				return Age(len(n)), nil
-			}),
-		)
-
-		age, err := Inject[Age](c2)
-		if err != nil || age != 3 {
-			t.Errorf("expected 3, got %v", age)
 		}
 	})
 
@@ -1248,18 +1091,6 @@ func ExampleContainer_Inject() {
 	err := c.Inject(&db, &cfg)
 	fmt.Printf("Injected: %v, DB: %s, App: %s\n", err == nil, db.DSN, cfg.AppName)
 	// Output: Injected: true, DB: mysql://localhost, App: my-app
-}
-
-func Example_multiContainer() {
-	c1, c2 := &Container{}, &Container{}
-	c1.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	c2.MustAdd(Provide(Config{AppName: "multi-app"}))
-
-	db, _ := Inject[Database](c1, c2)
-	cfg, _ := Inject[Config](c1, c2)
-
-	fmt.Printf("DB: %s, App: %s\n", db.DSN, cfg.AppName)
-	// Output: DB: mysql://localhost, App: multi-app
 }
 
 func BenchmarkInject(b *testing.B) {

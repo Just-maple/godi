@@ -12,7 +12,7 @@ Lightweight Go dependency injection framework built on generics. Zero reflection
 | **Type-Safe** | Full generics support, compile-time type checking |
 | **Lazy Loading** | Dependencies initialized on first use |
 | **Circular Detection** | Automatic runtime detection of circular dependencies |
-| **Multi-Container** | Cross-container dependency lookup |
+
 | **Thread-Safe** | All operations are concurrent-safe |
 | **Interface Support** | Full dependency inversion principle support |
 | **Hook System** | Lifecycle hooks for initialization and cleanup |
@@ -257,19 +257,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. Multi-Container Injection
 
-```go
-c1 := &godi.Container{}
-c2 := &godi.Container{}
-
-c1.MustAdd(godi.Provide(Database{DSN: "db1"}))
-c2.MustAdd(godi.Provide(Config{AppName: "app2"}))
-
-// Search containers in order
-db, err := godi.Inject[Database](c1, c2)
-cfg, err := godi.Inject[Config](c1, c2)
-```
 
 ### 8. Transform with Chain
 
@@ -310,7 +298,7 @@ len := godi.MustInject[Length](c) // 5
 | **Learning Curve** | Low | Medium | High | Low |
 | **Bundle Size** | Minimal | Medium | Large | Small |
 | **Lifecycle Hooks** | ✅ | ✅ | ❌ | ✅ |
-| **Multi-Container** | ✅ | ✅ (Scope) | ❌ | ✅ (Scope) |
+
 | **Circular Detection** | ✅ | ✅ | ✅ | ✅ |
 | **Lazy Loading** | ✅ | ✅ | ❌ | ✅ |
 | **Project Status** | Active | Active | ⚠️ Archived | Active |
@@ -321,7 +309,7 @@ len := godi.MustInject[Length](c) // 5
 - You want **minimal dependencies** and small bundle size
 - You need **lifecycle management** for resources
 - You value **simple, intuitive API**
-- You work with **multiple containers** or modular architecture
+
 
 ## 📁 Examples
 
@@ -333,15 +321,14 @@ Complete examples available in [`examples/`](examples/):
 | 02 | [error-handling](examples/02-error-handling/) | Error handling strategies |
 | 03 | [must-inject](examples/03-must-inject/) | Panic-mode injection |
 | 04 | [all-types](examples/04-all-types/) | All supported types |
-| 05 | [multi-container](examples/05-multi-container/) | Cross-container injection |
-| 06 | [concurrent](examples/06-concurrent/) | Concurrent safety |
-| 07 | [generics](examples/07-generics/) | Advanced generics |
-| 08 | [testing-mock](examples/08-testing-mock/) | Mock testing patterns |
-| 09 | [web-app](examples/09-web-app/) | Production web app structure |
-| 10 | [lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Resource cleanup with hooks |
-| 11 | [chain](examples/11-chain/) | Dependency transformation |
-| 12 | [struct-field-inject](examples/12-struct-field-inject/) | Struct field injection |
-| 13 | [hook](examples/13-hook/) | Hook lifecycle management |
+| 05 | [concurrent](examples/05-concurrent/) | Concurrent safety |
+| 06 | [generics](examples/06-generics/) | Advanced generics |
+| 07 | [testing-mock](examples/07-testing-mock/) | Mock testing patterns |
+| 08 | [web-app](examples/08-web-app/) | Production web app structure |
+| 09 | [lifecycle-cleanup](examples/09-lifecycle-cleanup/) | Resource cleanup with hooks |
+| 10 | [chain](examples/10-chain/) | Dependency transformation |
+| 11 | [struct-field-inject](examples/11-struct-field-inject/) | Struct field injection |
+| 12 | [hook](examples/12-hook/) | Hook lifecycle management |
 
 ## 🤝 Contributing
 

@@ -12,7 +12,7 @@
 | **类型安全** | 完整泛型支持，编译时类型检查 |
 | **懒加载** | 依赖首次使用时初始化 |
 | **循环检测** | 运行时自动检测循环依赖 |
-| **多容器** | 跨容器依赖查找 |
+
 | **并发安全** | 所有操作线程安全 |
 | **接口支持** | 完整支持依赖倒置原则 |
 | **Hook 系统** | 生命周期钩子管理初始化和清理 |
@@ -257,19 +257,7 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 7. 多容器注入
 
-```go
-c1 := &godi.Container{}
-c2 := &godi.Container{}
-
-c1.MustAdd(godi.Provide(Database{DSN: "db1"}))
-c2.MustAdd(godi.Provide(Config{AppName: "app2"}))
-
-// 按顺序查找容器
-db, err := godi.Inject[Database](c1, c2)
-cfg, err := godi.Inject[Config](c1, c2)
-```
 
 ### 8. Chain 转换
 
@@ -310,7 +298,7 @@ len := godi.MustInject[Length](c) // 5
 | **学习曲线** | 低 | 中 | 高 | 低 |
 | **打包体积** | 最小 | 中 | 大 | 小 |
 | **生命周期钩子** | ✅ | ✅ | ❌ | ✅ |
-| **多容器支持** | ✅ | ✅ (Scope) | ❌ | ✅ (Scope) |
+
 | **循环依赖检测** | ✅ | ✅ | ✅ | ✅ |
 | **懒加载** | ✅ | ✅ | ❌ | ✅ |
 | **项目状态** | 活跃 | 活跃 | ⚠️ 已归档 | 活跃 |
@@ -321,7 +309,7 @@ len := godi.MustInject[Length](c) // 5
 - 你需要**最小依赖**和小打包体积
 - 你需要资源的**生命周期管理**
 - 你重视**简单直观的 API**
-- 你使用**多容器**或模块化架构
+
 
 ## 📁 示例
 
@@ -333,15 +321,14 @@ len := godi.MustInject[Length](c) // 5
 | 02 | [error-handling](examples/02-error-handling/) | 错误处理策略 |
 | 03 | [must-inject](examples/03-must-inject/) | Panic 模式注入 |
 | 04 | [all-types](examples/04-all-types/) | 所有支持的类型 |
-| 05 | [multi-container](examples/05-multi-container/) | 跨容器注入 |
-| 06 | [concurrent](examples/06-concurrent/) | 并发安全 |
-| 07 | [generics](examples/07-generics/) | 高级泛型 |
-| 08 | [testing-mock](examples/08-testing-mock/) | Mock 测试模式 |
-| 09 | [web-app](examples/09-web-app/) | 生产级 Web 应用结构 |
-| 10 | [lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Hook 资源清理 |
-| 11 | [chain](examples/11-chain/) | 依赖转换 |
-| 12 | [struct-field-inject](examples/12-struct-field-inject/) | 结构体字段注入 |
-| 13 | [hook](examples/13-hook/) | Hook 生命周期管理 |
+| 05 | [concurrent](examples/05-concurrent/) | 并发安全 |
+| 06 | [generics](examples/06-generics/) | 高级泛型 |
+| 07 | [testing-mock](examples/07-testing-mock/) | Mock 测试模式 |
+| 08 | [web-app](examples/08-web-app/) | 生产级 Web 应用结构 |
+| 09 | [lifecycle-cleanup](examples/09-lifecycle-cleanup/) | Hook 资源清理 |
+| 10 | [chain](examples/10-chain/) | 依赖转换 |
+| 11 | [struct-field-inject](examples/11-struct-field-inject/) | 结构体字段注入 |
+| 12 | [hook](examples/12-hook/) | Hook 生命周期管理 |
 
 ## 🤝 贡献
 

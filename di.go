@@ -94,32 +94,28 @@ func (c *Container) Inject(ps ...any) error {
 	return nil
 }
 
-func InjectAs(v any, cs ...*Container) (err error) {
-	for _, c := range cs {
-		if c.providers.Range(func(id, p interface{}) bool {
-			if pv := p.(Provider); pv.Is(v) {
-				err = c.inject(pv, id, v)
-				v = nil
-			}
-			return v != nil
-		}); v == nil {
-			return
+func InjectAs(v any, c *Container) (err error) {
+	if c.providers.Range(func(id, p interface{}) bool {
+		if pv := p.(Provider); pv.Is(v) {
+			err = c.inject(pv, id, v)
+			v = nil
 		}
+		return v != nil
+	}); v == nil {
+		return
 	}
 	return fmt.Errorf("provider %T not found", v)
 }
 
-func InjectTo[T any](v *T, cs ...*Container) (err error) {
+func InjectTo[T any](v *T, c *Container) (err error) {
 	id := (*T)(nil)
-	for _, c := range cs {
-		if p, ok := c.providers.Load(id); ok {
-			return c.inject(p.(Provider), id, v)
-		}
+	if p, ok := c.providers.Load(id); ok {
+		return c.inject(p.(Provider), id, v)
 	}
 	return fmt.Errorf("provider %T not found", v)
 }
 
-func MustInjectAs(v any, c ...*Container)          { must(InjectAs(v, c...)) }
-func MustInjectTo[T any](v *T, c ...*Container)    { must(InjectTo(v, c...)) }
-func Inject[T any](c ...*Container) (v T, _ error) { return v, InjectTo(&v, c...) }
-func MustInject[T any](c ...*Container) (v T)      { MustInjectTo[T](&v, c...); return }
+func MustInjectAs(v any, c *Container)          { must(InjectAs(v, c)) }
+func MustInjectTo[T any](v *T, c *Container)    { must(InjectTo(v, c)) }
+func Inject[T any](c *Container) (v T, _ error) { return v, InjectTo(&v, c) }
+func MustInject[T any](c *Container) (v T)      { MustInjectTo[T](&v, c); return }

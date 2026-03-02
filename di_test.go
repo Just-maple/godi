@@ -38,9 +38,6 @@ func TestProvide(t *testing.T) {
 	if got.DSN != db.DSN {
 		t.Errorf("expected %s, got %s", db.DSN, got.DSN)
 	}
-	if _, ok := p.ID().(*Database); !ok {
-		t.Errorf("expected *Database ID, got %T", p.ID())
-	}
 }
 
 func TestContainer_AddAndInject(t *testing.T) {
@@ -515,7 +512,7 @@ func TestContainer_MustAdd(t *testing.T) {
 
 func TestContainer_ProviderID(t *testing.T) {
 	p := Provide(Database{DSN: "test"})
-	id := p.ID()
+	id, _ := p.Provide(nil)
 	if id == nil {
 		t.Fatal("expected non-nil ID")
 	}

@@ -7,14 +7,12 @@ import (
 
 type Provider interface {
 	inject(c *Container, ptr any) (v any, err error)
-	ID() any
 	Provide(any) (any, bool)
 }
 
 type provider[T any] func(*Container, *T) (T, error)
 
-func (p provider[T]) Provide(a any) (any, bool)                 { _, ok := a.(*T); return p.ID(), ok }
-func (p provider[T]) ID() any                                   { return (*T)(nil) }
+func (p provider[T]) Provide(a any) (any, bool)                 { _, ok := a.(*T); return (*T)(nil), ok }
 func (p provider[T]) inject(c *Container, ptr any) (any, error) { return p(c, ptr.(*T)) }
 
 func Provide[T any](v T) Provider {
@@ -54,9 +52,10 @@ func must(err error) {
 
 type Container struct{ providers, injecting, hooks sync.Map }
 
-func (c *Container) ID() any { return c }
 func (c *Container) Provide(v any) (id any, ok bool) {
-	if sub, is := v.(*Container); is {
+	if v == nil {
+		return c, false
+	} else if sub, is := v.(*Container); is {
 		sub.providers.Range(func(k, _ any) bool { id, ok = c.Provide(k); return !ok })
 	} else {
 		c.providers.Range(func(_, p any) bool { id, ok = p.(Provider).Provide(v); return !ok })
@@ -82,7 +81,7 @@ func (c *Container) Add(ps ...Provider) error {
 		return fmt.Errorf("container frozen: already provided to %T %p", parent, parent)
 	}
 	for _, p := range ps {
-		id := p.ID()
+		id, _ := p.Provide(nil)
 		if _id, provided := c.Provide(id); provided {
 			return fmt.Errorf("provider %T already exists", _id)
 		} else if sub, ok := id.(*Container); ok {

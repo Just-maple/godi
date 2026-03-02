@@ -69,13 +69,12 @@ func (c *Container) inject(_ *Container, v any) (value any, err error) {
 		pv := p.(Provider)
 		if _id, ok := pv.Provide(v); ok {
 			value, err = c.injectFrom(pv, _id, v)
-			v = nil
 		}
-		return v != nil
-	}); v == nil {
-		return
+		return value == nil && err == nil
+	}); value == nil && err == nil {
+		err = fmt.Errorf("provider %T not found", v)
 	}
-	return nil, fmt.Errorf("provider %T not found", v)
+	return
 }
 
 func (c *Container) Add(ps ...Provider) error {
@@ -101,10 +100,10 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 	return c
 }
 
-func (c *Container) injectFrom(provider Provider, id, ptr any) (v any, err error) {
-	if _, on := c.injecting.LoadOrStore(id, true); on {
+func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
+	if _, on := c.injecting.LoadOrStore(id, ptr); on {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
-	} else if v, err = provider.inject(c, ptr); err == nil {
+	} else if v, err = p.inject(c, ptr); err == nil {
 		c.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
 	c.injecting.Delete(id)

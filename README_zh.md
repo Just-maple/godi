@@ -12,10 +12,10 @@
 | **类型安全** | 完整泛型支持，编译时类型检查 |
 | **懒加载** | 依赖首次使用时初始化 |
 | **循环检测** | 运行时自动检测循环依赖 |
-
 | **并发安全** | 所有操作线程安全 |
 | **接口支持** | 完整支持依赖倒置原则 |
 | **Hook 系统** | 生命周期钩子管理初始化和清理 |
+| **容器嵌套** | 树形容器组合，自动重复检测 |
 
 ## 📦 安装
 
@@ -41,7 +41,6 @@ type Database struct {
 func main() {
     c := &godi.Container{}
     
-    // 注册依赖
     c.MustAdd(
         godi.Provide(Config{DSN: "mysql://localhost"}),
         godi.Build(func(c *godi.Container) (*Database, error) {
@@ -50,7 +49,6 @@ func main() {
         }),
     )
     
-    // 注入依赖
     db := godi.MustInject[*Database](c)
     println(db.Conn) // 输出：mysql://localhost
 }
@@ -63,7 +61,7 @@ func main() {
 | 方法 | 说明 | 使用场景 |
 |------|------|----------|
 | `Provide(T)` | 注册实例值 | 简单值、配置 |
-| `Build(func) (T, error)` | 注册工厂函数（懒加载，单例） | 复杂初始化、懒加载 |
+| `Build(func) (T, error)` | 注册工厂函数（懒加载，单例） | 复杂初始化 |
 | `Chain(func) (T, error)` | 从现有依赖派生 | 类型转换/派生新类型 |
 
 ```go
@@ -111,6 +109,8 @@ err = c.Inject(&service.DB, &service.Config)
 
 ### 生命周期钩子
 
+Hook 允许在依赖注入时注册回调函数。
+
 ```go
 c := &godi.Container{}
 
@@ -140,6 +140,173 @@ shutdown(func(hooks []func(context.Context)) {
         fn(ctx)
     }
 })
+```
+
+**Hook 机制：**
+
+| 方面 | 行为 |
+|------|------|
+| **触发时机** | 依赖注入时注册 Hook |
+| **执行方式** | 显式执行 - 必须调用返回的执行器函数 |
+| **`provided` 计数器** | 跟踪类型被注入的次数（0 = 首次） |
+| **HookOnce** | 当 `provided > 0` 时自动跳过 |
+| **Hook** | 通过 `provided` 参数手动控制 |
+| **执行顺序** | Hook 按注册顺序执行 |
+| **嵌套容器** | Hook 在依赖提供的容器上触发 |
+
+**嵌套容器中的 Hook 行为：**
+
+Hook 在**注入路径上的每个容器**上触发。`provided` 计数器跟踪每个容器中每个类型被注入的次数：
+
+```go
+// 子容器带 Hook
+child := &godi.Container{}
+child.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+child.Hook("startup", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil // 已注入则跳过
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("[子容器] 启动：%T\n", v)
+    }
+})
+
+// 父容器
+parent := &godi.Container{}
+parent.MustAdd(child)
+
+// 从父容器注入 - 触发两个容器的 Hook
+_, _ = godi.Inject[Database](parent)
+// 输出：[子容器] 启动：Database
+//       [父容器] 启动：Database
+```
+
+**关键点：**
+- Hook 在**注入路径上的每个容器**上触发
+- 每个容器维护**独立的 `provided` 计数器**（按类型）
+- 使用 `provided > 0` 检查确保 Hook 只在首次注入时运行
+- 分别执行每个容器的 Hook
+
+**常见模式：**
+
+```go
+// 1. 资源清理
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        if closer, ok := v.(interface{ Close() error }); ok {
+            closer.Close()
+        }
+    }
+})
+
+// 2. 条件初始化
+startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil // 只初始化一次
+    }
+    return func(ctx context.Context) {
+        // 初始化资源
+    }
+})
+
+// 3. 基于接口的清理
+c.HookOnce("cleanup", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        switch resource := v.(type) {
+        case Database:
+            resource.Close()
+        case Cache:
+            resource.Disconnect()
+        }
+    }
+})
+```
+
+### 容器嵌套
+
+容器嵌套支持构建模块化、树形结构的应用，具有自动重复检测和容器冻结功能。
+
+```go
+// 子容器
+child := &godi.Container{}
+child.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+
+// 父容器嵌套子容器
+parent := &godi.Container{}
+parent.MustAdd(child)
+
+// 从父容器注入（在子容器中查找 Database）
+db, _ := godi.Inject[Database](parent)
+
+// 重复类型会被阻止
+err := parent.Add(godi.Provide(Database{DSN: "other"}))
+// err: provider *godi.Database already exists
+```
+
+**核心机制：**
+
+| 机制 | 行为 |
+|------|------|
+| **树形搜索** | Inject 深度优先遍历子容器 |
+| **重复检测** | Add 检查所有嵌套容器中是否已存在该类型 |
+| **容器冻结** | 子容器添加到父容器后被冻结，不能添加新提供者 |
+| **Hook 传播** | Hook 在注入路径上的每个容器上触发 |
+| **每容器计数器** | 每个容器跟踪自己每个类型的 `provided` 计数 |
+
+**容器冻结机制：**
+
+当容器被添加到父容器后，它会被**冻结**，无法再接受新的提供者：
+
+```go
+child := &godi.Container{}
+child.MustAdd(godi.Provide(Config{Value: "child"}))
+
+parent := &godi.Container{}
+parent.MustAdd(child)  // child 现在被冻结
+
+// 这会失败："container frozen cause added as provider"
+err := child.Add(godi.Provide(struct{ Name string }{Name: "new"}))
+```
+
+**Provide 方法：**
+
+检查容器（包括嵌套容器）是否提供某类型：
+
+```go
+c := &godi.Container{}
+c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+
+db := Database{}
+fmt.Println(c.Provide(&db))  // true
+
+other := struct{ Other string }{}
+fmt.Println(c.Provide(&other))  // false
+```
+
+**嵌套容器中的 Hook 行为：**
+
+从父容器注入时，Hook 会在注入路径上的每个容器上触发：
+
+```go
+// 子容器有自己的 Hook
+child := &godi.Container{}
+child.MustAdd(godi.Provide(Database{...}))
+child.Hook("startup", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("[子容器] 启动：%T\n", v)
+    }
+})
+
+// 父容器
+parent := &godi.Container{}
+parent.MustAdd(child)
+
+// 从父容器注入触发两个容器的 Hook
+_, _ = godi.Inject[Database](parent)
+// 子容器和父容器的 Hook 都会被调用
 ```
 
 ## 📚 使用模式
@@ -210,7 +377,6 @@ c.MustAdd(
 ```go
 c := &godi.Container{}
 
-// 注册关闭钩子
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         if closer, ok := v.(interface{ Close() error }); ok {
@@ -219,7 +385,6 @@ shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     }
 })
 
-// 注册资源
 c.MustAdd(
     godi.Build(func(c *godi.Container) (*Database, error) {
         return NewDatabase("dsn")
@@ -229,7 +394,6 @@ c.MustAdd(
     }),
 )
 
-// 执行关闭
 shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 defer cancel()
 
@@ -257,7 +421,25 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
+### 7. 容器嵌套
 
+```go
+// 基础设施层
+infra := &godi.Container{}
+infra.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+)
+
+// 应用层
+app := &godi.Container{}
+app.MustAdd(infra, godi.Provide(Config{AppName: "my-app"}))
+
+// 从父容器注入所有依赖
+db, _ := godi.Inject[Database](app)
+cache, _ := godi.Inject[Cache](app)
+cfg, _ := godi.Inject[Config](app)
+```
 
 ### 8. Chain 转换
 
@@ -298,9 +480,9 @@ len := godi.MustInject[Length](c) // 5
 | **学习曲线** | 低 | 中 | 高 | 低 |
 | **打包体积** | 最小 | 中 | 大 | 小 |
 | **生命周期钩子** | ✅ | ✅ | ❌ | ✅ |
-
 | **循环依赖检测** | ✅ | ✅ | ✅ | ✅ |
 | **懒加载** | ✅ | ✅ | ❌ | ✅ |
+| **容器嵌套** | ✅ | ❌ | ❌ | ❌ |
 | **项目状态** | 活跃 | 活跃 | ⚠️ 已归档 | 活跃 |
 
 ### 何时选择 godi
@@ -309,7 +491,7 @@ len := godi.MustInject[Length](c) // 5
 - 你需要**最小依赖**和小打包体积
 - 你需要资源的**生命周期管理**
 - 你重视**简单直观的 API**
-
+- 你需要**容器嵌套**实现模块化架构
 
 ## 📁 示例
 

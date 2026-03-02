@@ -6,26 +6,19 @@ import (
 )
 
 type Provider interface {
-	inject(*Container, any) error
+	inject(*Container, any) (any, error)
 	ID() any
-	Is(any) bool
+	Provide(any) bool
 }
 
-type provider[T any] func(*Container, any) error
+type provider[T any] func(*Container, *T) (T, error)
 
-func (p provider[T]) Is(a any) bool                      { _, ok := a.(*T); return ok }
-func (p provider[T]) ID() any                            { return (*T)(nil) }
-func (p provider[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
+func (p provider[T]) Provide(a any) bool                        { _, ok := a.(*T); return ok }
+func (p provider[T]) ID() any                                   { return (*T)(nil) }
+func (p provider[T]) inject(c *Container, ptr any) (any, error) { return p(c, ptr.(*T)) }
 
 func Provide[T any](v T) Provider {
-	return provider[T](func(c *Container, p any) error { return inject(c, p.(*T), v) })
-}
-
-func inject[T any](c *Container, p *T, v T) error {
-	if *p = v; c != nil {
-		c.hooks.Range(func(_, h any) bool { h.(func(any, any))((*T)(nil), v); return true })
-	}
-	return nil
+	return provider[T](func(c *Container, p *T) (T, error) { *p = v; return v, nil })
 }
 
 func Build[T any](f func(*Container) (T, error)) Provider {
@@ -34,11 +27,12 @@ func Build[T any](f func(*Container) (T, error)) Provider {
 		once  sync.Once
 		err   error
 	})
-	return provider[T](func(c *Container, ptr any) error {
+	return provider[T](func(c *Container, ptr *T) (zero T, _ error) {
 		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
-			return fmt.Errorf("create %T error: %w", l.value, l.err)
+			return zero, fmt.Errorf("build %T error: %w", l.value, l.err)
 		}
-		return inject(c, ptr.(*T), l.value)
+		*ptr = l.value
+		return l.value, nil
 	})
 }
 
@@ -60,12 +54,55 @@ func must(err error) {
 
 type Container struct{ providers, injecting, hooks sync.Map }
 
+func (c *Container) ID() any { return c }
+
+func (c *Container) Provide(v any) (ok bool) { _, ok = c.provide(v); return }
+
+func (c *Container) provide(v any) (id any, ok bool) {
+	if sub, is := v.(*Container); is {
+		sub.providers.Range(func(_id, _ any) bool {
+			id, ok = c.provide(_id)
+			return !ok
+		})
+		return
+	}
+	c.providers.Range(func(_, p any) bool {
+		if sub, is := p.(*Container); is {
+			id, ok = sub.provide(v)
+		} else if pv := p.(Provider); pv.Provide(v) {
+			id = pv.ID()
+			ok = true
+		}
+		return !ok
+	})
+	return id, ok
+}
+
+func (c *Container) inject(_ *Container, v any) (value any, err error) {
+	if c.providers.Range(func(id, p any) bool {
+		if pv := p.(Provider); pv.Provide(v) {
+			value, err = c.injectFrom(pv, id, v)
+			v = nil
+		}
+		return v != nil
+	}); v == nil {
+		return
+	}
+	return nil, fmt.Errorf("provider %T not found", v)
+}
+
 func (c *Container) Add(ps ...Provider) error {
+	if _, exist := c.injecting.Load(c); exist {
+		return fmt.Errorf("container frozen cause added as provider")
+	}
 	for _, p := range ps {
 		id := p.ID()
-		if _, exist := c.providers.LoadOrStore(id, p); exist {
-			return fmt.Errorf("provider %T already exists", id)
+		if _id, provided := c.provide(id); provided {
+			return fmt.Errorf("provider %T already exists", _id)
+		} else if sub, ok := id.(*Container); ok {
+			sub.injecting.Store(sub, true)
 		}
+		c.providers.Store(id, p)
 	}
 	return nil
 }
@@ -77,12 +114,15 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 	return c
 }
 
-func (c *Container) inject(provider Provider, id, v any) (err error) {
+func (c *Container) injectFrom(provider Provider, id, ptr any) (v any, err error) {
 	if _, on := c.injecting.LoadOrStore(id, true); on {
-		return fmt.Errorf("circular dependency for %T", v)
+		return nil, fmt.Errorf("circular dependency for %T", ptr)
+	} else if v, err = provider.inject(c, ptr); err == nil {
+		_id, _ := c.provide(ptr)
+		c.hooks.Range(func(_, h any) bool { h.(func(any, any))(_id, v); return true })
 	}
-	defer c.injecting.Delete(id)
-	return provider.inject(c, v)
+	c.injecting.Delete(id)
+	return
 }
 
 func (c *Container) Inject(ps ...any) error {
@@ -94,25 +134,16 @@ func (c *Container) Inject(ps ...any) error {
 	return nil
 }
 
-func InjectAs(v any, c *Container) (err error) {
-	if c.providers.Range(func(id, p interface{}) bool {
-		if pv := p.(Provider); pv.Is(v) {
-			err = c.inject(pv, id, v)
-			v = nil
-		}
-		return v != nil
-	}); v == nil {
-		return
-	}
-	return fmt.Errorf("provider %T not found", v)
-}
+func InjectAs(v any, c *Container) (err error) { _, err = c.inject(c, v); return }
 
 func InjectTo[T any](v *T, c *Container) (err error) {
 	id := (*T)(nil)
 	if p, ok := c.providers.Load(id); ok {
-		return c.inject(p.(Provider), id, v)
+		_, err = c.injectFrom(p.(Provider), id, v)
+		return
 	}
-	return fmt.Errorf("provider %T not found", v)
+	_, err = c.inject(c, v)
+	return
 }
 
 func MustInjectAs(v any, c *Container)          { must(InjectAs(v, c)) }

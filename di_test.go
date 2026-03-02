@@ -31,7 +31,7 @@ func TestProvide(t *testing.T) {
 	p := Provide(db)
 
 	var got Database
-	if err := p.inject(nil, &got); err != nil {
+	if _, err := p.inject(nil, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.DSN != db.DSN {
@@ -1338,4 +1338,266 @@ func Example_hook() {
 	// Starting: godi.Config
 	// Stopping: godi.Database
 	// Stopping: godi.Config
+}
+
+// ============== Nested Container Hook Mechanism Tests ==============
+
+func TestContainer_Nested_Hook_BothContainersTriggered(t *testing.T) {
+	type Database struct{ DSN string }
+
+	child := &Container{}
+	child.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+
+	childHookCalled := false
+	childStartup := child.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(Database); ok {
+				childHookCalled = true
+			}
+		}
+	})
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	parentHookCalled := false
+	parentStartup := parent.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(Database); ok {
+				parentHookCalled = true
+			}
+		}
+	})
+
+	_, _ = Inject[Database](parent)
+
+	childStartup(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	parentStartup(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if !childHookCalled {
+		t.Error("expected child hook to be called")
+	}
+	// Parent hook is also triggered because hooks fire on each container in the chain
+	if !parentHookCalled {
+		t.Error("expected parent hook to be called")
+	}
+}
+
+func TestContainer_Nested_Hook_HookOnceOnBothContainers(t *testing.T) {
+	type Database struct{ DSN string }
+
+	child := &Container{}
+	child.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+
+	childCallCount := 0
+	childShutdown := child.HookOnce("shutdown", func(v any) func(context.Context) {
+		return func(ctx context.Context) {
+			if _, ok := v.(Database); ok {
+				childCallCount++
+			}
+		}
+	})
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	parentCallCount := 0
+	parentShutdown := parent.HookOnce("shutdown", func(v any) func(context.Context) {
+		return func(ctx context.Context) {
+			if _, ok := v.(Database); ok {
+				parentCallCount++
+			}
+		}
+	})
+
+	_, _ = Inject[Database](parent)
+	_, _ = Inject[Database](parent)
+
+	childShutdown(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	parentShutdown(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	// Both containers trigger HookOnce for the first injection
+	if childCallCount != 1 {
+		t.Errorf("expected childCallCount=1, got %d", childCallCount)
+	}
+	if parentCallCount != 1 {
+		t.Errorf("expected parentCallCount=1, got %d", parentCallCount)
+	}
+}
+
+func TestContainer_Nested_Hook_ThreeLevelContainer(t *testing.T) {
+	type Database struct{ DSN string }
+	type Cache struct{ Addr string }
+	type Config struct{ AppName string }
+
+	infra := &Container{}
+	infra.MustAdd(
+		Provide(Database{DSN: "mysql://localhost"}),
+		Provide(Cache{Addr: "redis://localhost"}),
+	)
+
+	infraCalls := 0
+	infraHook := infra.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			infraCalls++
+		}
+	})
+
+	services := &Container{}
+	services.MustAdd(infra)
+
+	servicesCalls := 0
+	servicesHook := services.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			servicesCalls++
+		}
+	})
+
+	app := &Container{}
+	app.MustAdd(services, Provide(Config{AppName: "my-app"}))
+
+	appCalls := 0
+	appHook := app.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			appCalls++
+		}
+	})
+
+	_, _ = Inject[Database](app)
+	_, _ = Inject[Cache](app)
+	_, _ = Inject[Config](app)
+
+	infraHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	servicesHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	appHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	// Hook mechanism for nested containers:
+	// - Hooks trigger on EACH container in the injection chain
+	// - provided counter is per-type (key is type ID like *Database)
+	//
+	// Injection flow:
+	// 1. Database: infra(0), services(0), app(0) - all first time
+	// 2. Cache: infra(0), services(0), app(0) - all first time (different type)
+	// 3. Config: app(0) - direct provide
+	//
+	// Results:
+	// - infraCalls=2 (Database-0, Cache-0)
+	// - servicesCalls=2 (Database-0, Cache-0)
+	// - appCalls=3 (Database-0, Cache-0, Config-0)
+	if infraCalls != 2 {
+		t.Errorf("expected infraCalls=2, got %d", infraCalls)
+	}
+	if servicesCalls != 2 {
+		t.Errorf("expected servicesCalls=2, got %d", servicesCalls)
+	}
+	if appCalls != 3 {
+		t.Errorf("expected appCalls=3, got %d", appCalls)
+	}
+}
+
+func Example_container_Nested_Hooks() {
+	type Database struct{ DSN string }
+	type Cache struct{ Addr string }
+
+	infra := &Container{}
+	infra.MustAdd(
+		Provide(Database{DSN: "mysql://localhost"}),
+		Provide(Cache{Addr: "redis://localhost"}),
+	)
+
+	infraHook := infra.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			switch v.(type) {
+			case Database:
+				fmt.Printf("[Infra] DB starting\n")
+			case Cache:
+				fmt.Printf("[Infra] Cache starting\n")
+			}
+		}
+	})
+
+	app := &Container{}
+	app.MustAdd(infra)
+
+	appHook := app.Hook("startup", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			switch v.(type) {
+			case Database:
+				fmt.Printf("[App] DB starting\n")
+			}
+		}
+	})
+
+	_, _ = Inject[Database](app)
+	_, _ = Inject[Cache](app)
+
+	infraHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	appHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	// Output:
+	// [Infra] DB starting
+	// [Infra] Cache starting
+	// [App] DB starting
 }

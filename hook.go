@@ -20,27 +20,25 @@ func (hooks Hooks) Iterate(ctx context.Context, reverse bool) {
 }
 
 func (c *Container) Hook(name string, build func(v any, provided int) func(ctx context.Context)) Hooks {
-	lock := sync.Mutex{}
+	mu := sync.Mutex{}
 	called := make(map[any]int)
 	fns := make([]func(context.Context), 0)
 	c.hooks.Store(name, func(id, v any) {
-		lock.Lock()
+		mu.Lock()
 		count := called[id]
 		called[id]++
-		lock.Unlock()
+		mu.Unlock()
 		if fn := build(v, count); fn != nil {
-			lock.Lock()
+			mu.Lock()
 			fns = append(fns, fn)
-			lock.Unlock()
+			mu.Unlock()
 		}
 	})
 	return func(f func([]func(ctx context.Context))) {
-		lock.Lock()
-		hooks := make([]func(context.Context), 0, len(fns))
-		for _, fn := range fns {
-			hooks = append(hooks, fn)
-		}
-		lock.Unlock()
+		mu.Lock()
+		hooks := make([]func(context.Context), len(fns))
+		copy(hooks, fns)
+		mu.Unlock()
 		f(hooks)
 	}
 }

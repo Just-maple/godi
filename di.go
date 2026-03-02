@@ -50,7 +50,10 @@ func must(err error) {
 	}
 }
 
-type Container struct{ providers, injecting, hooks sync.Map }
+type Container struct {
+	providers sync.Map
+	hooks     sync.Map
+}
 
 func (c *Container) Provide(v any) (id any, ok bool) {
 	if v == nil {
@@ -76,8 +79,10 @@ func (c *Container) inject(_ *Container, v any) (value any, err error) {
 	return
 }
 
+var empty = &Container{}
+
 func (c *Container) Add(ps ...Provider) error {
-	if parent, exist := c.injecting.Load((*Container)(nil)); exist {
+	if parent, exist := c.providers.Load(empty); exist {
 		return fmt.Errorf("container frozen: already provided to %T %p", parent, parent)
 	}
 	for _, p := range ps {
@@ -85,7 +90,7 @@ func (c *Container) Add(ps ...Provider) error {
 		if _id, provided := c.Provide(id); provided {
 			return fmt.Errorf("provider %T already exists", _id)
 		} else if sub, ok := id.(*Container); ok {
-			sub.injecting.Store((*Container)(nil), c)
+			sub.providers.Store(empty, empty)
 		}
 		c.providers.Store(id, p)
 	}
@@ -102,18 +107,17 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 func (c *Container) copy() *Container {
 	nc := &Container{}
 	cp := func(d, s *sync.Map) { s.Range(func(k, v interface{}) bool { d.Store(k, v); return true }) }
-	cp(&nc.injecting, &c.injecting)
 	cp(&nc.providers, &c.providers)
 	cp(&nc.hooks, &c.hooks)
 	return nc
 }
 
 func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
-	if _, on := c.injecting.Load(id); on {
+	if vv, on := c.providers.Load(id); on && vv == empty {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
 	}
 	nc := c.copy()
-	nc.injecting.Store(id, ptr)
+	nc.providers.Store(id, empty)
 	if v, err = p.inject(nc, ptr); err == nil {
 		nc.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}

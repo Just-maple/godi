@@ -129,7 +129,7 @@ func Run() error {
 		return fmt.Errorf("failed to inject App: %w", err)
 	}
 
-	shutdown, err := godi.Inject[func(func([]func(context.Context)))](container)
+	shutdown, err := godi.Inject[godi.Hooks](container)
 	if err != nil {
 		return fmt.Errorf("failed to inject shutdown: %w", err)
 	}
@@ -147,12 +147,7 @@ func Run() error {
 	defer cancel()
 
 	fmt.Println("\n=== Starting Graceful Shutdown ===")
-	shutdown(func(hooks []func(context.Context)) {
-		// Execute hooks in reverse order (LIFO)
-		for i := len(hooks) - 1; i >= 0; i-- {
-			hooks[i](shutdownCtx)
-		}
-	})
+	shutdown.Iterate(shutdownCtx, true) // true = reverse order (LIFO)
 	fmt.Println("=== Shutdown Complete ===")
 
 	return nil

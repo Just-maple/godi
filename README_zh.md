@@ -109,37 +109,65 @@ err = c.Inject(&service.DB, &service.Config)
 
 ### 生命周期钩子
 
-Hook 允许在依赖注入时注册回调函数。
+Hook 允许在依赖注入时注册回调函数。Hook 需要**显式执行** - 你必须调用返回的执行器函数。
 
 ```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/Just-maple/godi"
+)
+
 c := &godi.Container{}
 
-// Hook 带执行计数器
+// 注册依赖
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+)
+
+// Hook 带执行计数器 - 每次注入都会触发
 startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
     if provided > 0 {
-        return nil // 已调用则跳过
+        return nil // 如果之前已注入过则跳过
     }
     return func(ctx context.Context) {
         fmt.Printf("Starting: %T\n", v)
     }
 })
 
-// HookOnce - 自动单次执行
+// HookOnce - 仅在首次注入时自动运行
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
-        if closer, ok := v.(interface{ Close() error }); ok {
-            closer.Close()
-        }
+        fmt.Printf("Stopping: %T\n", v)
     }
 })
 
-// 执行钩子
+// 注入依赖（这会注册 hook）
+_, _ = godi.Inject[Database](c)
+_, _ = godi.Inject[Cache](c)
+
+// 显式执行 hook
 ctx := context.Background()
-shutdown(func(hooks []func(context.Context)) {
+
+// 方式 1：手动迭代
+startup(func(hooks []func(context.Context)) {
     for _, fn := range hooks {
         fn(ctx)
     }
 })
+
+// 方式 2：使用 Iterate 辅助方法（推荐）
+startup.Iterate(ctx, false) // false = 正序
+shutdown.Iterate(ctx, false)
+
+// 输出：
+// Starting: Database
+// Starting: Cache
+// Stopping: Database
+// Stopping: Cache
 ```
 
 **Hook 机制：**
@@ -152,45 +180,77 @@ shutdown(func(hooks []func(context.Context)) {
 | **HookOnce** | 当 `provided > 0` 时自动跳过 |
 | **Hook** | 通过 `provided` 参数手动控制 |
 | **执行顺序** | Hook 按注册顺序执行 |
-| **嵌套容器** | Hook 在依赖提供的容器上触发 |
+| **嵌套容器** | Hook 在注入路径上的每个容器触发 |
 
 **嵌套容器中的 Hook 行为：**
 
-Hook 在**注入路径上的每个容器**上触发。`provided` 计数器跟踪每个容器中每个类型被注入的次数：
+Hook 在**注入路径上的每个容器**上触发。每个容器为每种类型维护独立的 `provided` 计数器：
 
 ```go
-// 子容器带 Hook
-child := &godi.Container{}
-child.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
-child.Hook("startup", func(v any, provided int) func(context.Context) {
+// 基础设施层
+infra := &godi.Container{}
+infra.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+
+infraHook := infra.Hook("startup", func(v any, provided int) func(context.Context) {
     if provided > 0 {
-        return nil // 已注入则跳过
+        return nil
     }
     return func(ctx context.Context) {
-        fmt.Printf("[子容器] 启动：%T\n", v)
+        fmt.Printf("[Infra] Starting: %T\n", v)
     }
 })
 
-// 父容器
-parent := &godi.Container{}
-parent.MustAdd(child)
+// 应用层
+app := &godi.Container{}
+app.MustAdd(infra)
+
+appHook := app.Hook("startup", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("[App] Starting: %T\n", v)
+    }
+})
 
 // 从父容器注入 - 触发两个容器的 Hook
-_, _ = godi.Inject[Database](parent)
-// 输出：[子容器] 启动：Database
-//       [父容器] 启动：Database
+_, _ = godi.Inject[Database](app)
+
+// 分别为每个容器执行 hook
+// 方式 1：手动迭代
+infraHook(func(hooks []func(context.Context)) {
+    for _, fn := range hooks {
+        fn(context.Background())
+    }
+})
+
+appHook(func(hooks []func(context.Context)) {
+    for _, fn := range hooks {
+        fn(context.Background())
+    }
+})
+
+// 方式 2：使用 Iterate 辅助方法（推荐）
+ctx := context.Background()
+infraHook.Iterate(ctx, false)
+appHook.Iterate(ctx, false)
+
+// 输出：
+// [Infra] Starting: Database
+// [App] Starting: Database
 ```
 
 **关键点：**
 - Hook 在**注入路径上的每个容器**上触发
 - 每个容器维护**独立的 `provided` 计数器**（按类型）
 - 使用 `provided > 0` 检查确保 Hook 只在首次注入时运行
-- 分别执行每个容器的 Hook
+- Hook 在注入时注册，在调用执行器函数时执行
+- 为每个容器分别执行 hook
 
 **常见模式：**
 
 ```go
-// 1. 资源清理
+// 1. 资源清理（HookOnce）
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         if closer, ok := v.(interface{ Close() error }); ok {
@@ -200,9 +260,17 @@ shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
 })
 
 // 2. 条件初始化
+// 方式 A：使用 HookOnce（推荐用于简单场景）
+startup := c.HookOnce("startup", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        // 初始化资源 - 自动只运行一次
+    }
+})
+
+// 方式 B：使用 Hook 带 provided 检查（用于条件逻辑）
 startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
     if provided > 0 {
-        return nil // 只初始化一次
+        return nil // 仅在首次注入时初始化
     }
     return func(ctx context.Context) {
         // 初始化资源
@@ -220,6 +288,49 @@ c.HookOnce("cleanup", func(v any) func(context.Context) {
         }
     }
 })
+
+// 4. 逆序优雅关闭
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        // 清理逻辑
+    }
+})
+
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+// 逆序执行以确保正确的清理顺序
+shutdown.Iterate(shutdownCtx, true) // true = 逆序
+
+// 5. 多阶段生命周期
+// 为每个阶段使用 HookOnce（推荐）
+init := c.HookOnce("init", func(v any) func(context.Context) {
+    return func(ctx context.Context) { /* 初始化 */ }
+})
+
+start := c.HookOnce("start", func(v any) func(context.Context) {
+    return func(ctx context.Context) { /* 启动 */ }
+})
+
+// 或者为每个阶段使用 Hook 带 provided 检查的条件逻辑
+init := c.Hook("init", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) { /* 初始化 */ }
+})
+
+start := c.Hook("start", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) { /* 启动 */ }
+})
+
+// 按顺序执行各阶段
+ctx := context.Background()
+init.Iterate(ctx, false)
+start.Iterate(ctx, false)
 ```
 
 ### 容器嵌套
@@ -277,37 +388,20 @@ c := &godi.Container{}
 c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 
 db := Database{}
-fmt.Println(c.Provide(&db))  // true
+_, ok := c.Provide(&db)
+fmt.Println(ok)  // true
 
 other := struct{ Other string }{}
-fmt.Println(c.Provide(&other))  // false
+_, ok = c.Provide(&other)
+fmt.Println(ok)  // false
 ```
 
 **嵌套容器中的 Hook 行为：**
 
-从父容器注入时，Hook 会在注入路径上的每个容器上触发：
-
-```go
-// 子容器有自己的 Hook
-child := &godi.Container{}
-child.MustAdd(godi.Provide(Database{...}))
-child.Hook("startup", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) {
-        fmt.Printf("[子容器] 启动：%T\n", v)
-    }
-})
-
-// 父容器
-parent := &godi.Container{}
-parent.MustAdd(child)
-
-// 从父容器注入触发两个容器的 Hook
-_, _ = godi.Inject[Database](parent)
-// 子容器和父容器的 Hook 都会被调用
-```
+参见 [生命周期钩子](#生命周期钩子) 章节了解嵌套容器中 Hook 的详细行为。总结：
+- Hook 在**注入路径上的每个容器**上触发
+- 每个容器维护**独立的 `provided` 计数器**（按类型）
+- 使用每个容器的执行器函数分别执行 hook
 
 ## 📚 使用模式
 
@@ -377,6 +471,7 @@ c.MustAdd(
 ```go
 c := &godi.Container{}
 
+// 在注入依赖前注册 shutdown hook
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         if closer, ok := v.(interface{ Close() error }); ok {
@@ -394,14 +489,16 @@ c.MustAdd(
     }),
 )
 
+// 注入依赖（hook 会被注册）
+_, _ = godi.Inject[*Database](c)
+_, _ = godi.Inject[*Cache](c)
+
+// 带超时的优雅关闭
 shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 defer cancel()
 
-shutdown(func(hooks []func(context.Context)) {
-    for i := len(hooks) - 1; i >= 0; i-- {
-        hooks[i](shutdownCtx)
-    }
-})
+// 逆序执行 hook 以确保正确的清理顺序
+shutdown.Iterate(shutdownCtx, true) // true = 逆序
 ```
 
 ### 6. 测试 Mock
@@ -431,14 +528,33 @@ infra.MustAdd(
     godi.Provide(Cache{Addr: "redis://localhost"}),
 )
 
+// 在 infra 容器上注册 hook
+infraShutdown := infra.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        fmt.Printf("Infra cleanup: %T\n", v)
+    }
+})
+
 // 应用层
 app := &godi.Container{}
 app.MustAdd(infra, godi.Provide(Config{AppName: "my-app"}))
+
+// 在 app 容器上注册 hook
+appShutdown := app.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        fmt.Printf("App cleanup: %T\n", v)
+    }
+})
 
 // 从父容器注入所有依赖
 db, _ := godi.Inject[Database](app)
 cache, _ := godi.Inject[Cache](app)
 cfg, _ := godi.Inject[Config](app)
+
+// 为每个容器执行 hook
+ctx := context.Background()
+infraShutdown.Iterate(ctx, false)
+appShutdown.Iterate(ctx, false)
 ```
 
 ### 8. Chain 转换
@@ -511,6 +627,7 @@ len := godi.MustInject[Length](c) // 5
 | 10 | [chain](examples/10-chain/) | 依赖转换 |
 | 11 | [struct-field-inject](examples/11-struct-field-inject/) | 结构体字段注入 |
 | 12 | [hook](examples/12-hook/) | Hook 生命周期管理 |
+| 13 | [nested-container-hooks](examples/13-nested-container-hooks/) | 多层容器 Hooks |
 
 ## 🤝 贡献
 

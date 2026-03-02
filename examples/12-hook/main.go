@@ -49,17 +49,9 @@ func main() {
 	db := godi.MustInject[Database](c)
 	svc := godi.MustInject[Service](c)
 
-	startup(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	startup.Iterate(ctx, false)
 
 	fmt.Printf("Running: %s, %s, %s\n", cfg.AppName, db.DSN, svc.Name)
 
-	shutdown(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	shutdown.Iterate(ctx, true)
 }

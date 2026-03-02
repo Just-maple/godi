@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 )
 
@@ -1210,21 +1211,13 @@ func TestHook(t *testing.T) {
 	_, _ = Inject[Config](c)
 	_, _ = Inject[Config](c)
 
-	startup(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	startup.Iterate(ctx, false)
 
 	if startupCalled != 2 {
 		t.Errorf("expected startupCalled=2, got %d", startupCalled)
 	}
 
-	shutdown(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	shutdown.Iterate(ctx, false)
 
 	if shutdownCalled != 2 {
 		t.Errorf("expected shutdownCalled=2, got %d", shutdownCalled)
@@ -1259,11 +1252,7 @@ func TestHook_WithBuild(t *testing.T) {
 	ctx := context.Background()
 	_, _ = Inject[Database](c)
 
-	h(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	h.Iterate(ctx, false)
 
 	if buildCalled != 1 {
 		t.Errorf("expected buildCalled=1, got %d", buildCalled)
@@ -1322,17 +1311,9 @@ func Example_hook() {
 	_, _ = Inject[Database](c)
 	_, _ = Inject[Config](c)
 
-	startup(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	startup.Iterate(ctx, false)
 
-	shutdown(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(ctx)
-		}
-	})
+	shutdown.Iterate(ctx, false)
 	// Output:
 	// Starting: godi.Database
 	// Starting: godi.Config
@@ -1377,17 +1358,9 @@ func TestContainer_Nested_Hook_BothContainersTriggered(t *testing.T) {
 
 	_, _ = Inject[Database](parent)
 
-	childStartup(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	childStartup.Iterate(context.Background(), false)
 
-	parentStartup(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	parentStartup.Iterate(context.Background(), false)
 
 	if !childHookCalled {
 		t.Error("expected child hook to be called")
@@ -1428,17 +1401,9 @@ func TestContainer_Nested_Hook_HookOnceOnBothContainers(t *testing.T) {
 	_, _ = Inject[Database](parent)
 	_, _ = Inject[Database](parent)
 
-	childShutdown(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	childShutdown.Iterate(context.Background(), false)
 
-	parentShutdown(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	parentShutdown.Iterate(context.Background(), false)
 
 	// Both containers trigger HookOnce for the first injection
 	if childCallCount != 1 {
@@ -1500,23 +1465,11 @@ func TestContainer_Nested_Hook_ThreeLevelContainer(t *testing.T) {
 	_, _ = Inject[Cache](app)
 	_, _ = Inject[Config](app)
 
-	infraHook(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	infraHook.Iterate(context.Background(), false)
 
-	servicesHook(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	servicesHook.Iterate(context.Background(), false)
 
-	appHook(func(hooks []func(context.Context)) {
-		for _, fn := range hooks {
-			fn(context.Background())
-		}
-	})
+	appHook.Iterate(context.Background(), false)
 
 	// Hook mechanism for nested containers:
 	// - Hooks trigger on EACH container in the injection chain
@@ -1584,20 +1537,867 @@ func Example_container_Nested_Hooks() {
 	_, _ = Inject[Database](app)
 	_, _ = Inject[Cache](app)
 
-	infraHook(func(hooks []func(context.Context)) {
+	infraHook.Iterate(context.Background(), false)
+
+	appHook.Iterate(context.Background(), false)
+
+	// Output:
+	// [Infra] DB starting
+	// [Infra] Cache starting
+	// [App] DB starting
+}
+
+// ============== Advanced Nested Container Hook Tests ==============
+
+func TestNestedContainer_Hook_VerifyInjectionChain(t *testing.T) {
+	type DB struct{ Name string }
+	type Cache struct{ ID int }
+	type Logger struct{ Prefix string }
+
+	infra := &Container{}
+	infra.MustAdd(
+		Provide(DB{Name: "primary-db"}),
+		Provide(Cache{ID: 1}),
+	)
+
+	services := &Container{}
+	services.MustAdd(infra)
+
+	app := &Container{}
+	app.MustAdd(
+		services,
+		Provide(Logger{Prefix: "[APP]"}),
+	)
+
+	injectionOrder := make([]string, 0)
+	var mu sync.Mutex
+
+	exec := app.Hook("trace", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch v.(type) {
+			case DB:
+				injectionOrder = append(injectionOrder, "DB")
+			case Cache:
+				injectionOrder = append(injectionOrder, "Cache")
+			case Logger:
+				injectionOrder = append(injectionOrder, "Logger")
+			}
+		}
+	})
+
+	_, _ = Inject[DB](app)
+	_, _ = Inject[Cache](app)
+	_, _ = Inject[Logger](app)
+
+	exec(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(context.Background())
 		}
 	})
 
+	expected := []string{"DB", "Cache", "Logger"}
+	if len(injectionOrder) != len(expected) {
+		t.Fatalf("expected %d hooks, got %d", len(expected), len(injectionOrder))
+	}
+
+	for i, exp := range expected {
+		if injectionOrder[i] != exp {
+			t.Errorf("position %d: expected %s, got %s", i, exp, injectionOrder[i])
+		}
+	}
+}
+
+func TestNestedContainer_Hook_ProvidedCounter(t *testing.T) {
+	type Config struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(Config{Value: 42}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	callCounts := make(map[string]int)
+	var mu sync.Mutex
+
+	exec := parent.Hook("test", func(v any, provided int) func(context.Context) {
+		mu.Lock()
+		defer mu.Unlock()
+		if _, ok := v.(Config); ok {
+			key := fmt.Sprintf("Config-provided-%d", provided)
+			callCounts[key]++
+		}
+		return func(ctx context.Context) {}
+	})
+
+	_, _ = Inject[Config](parent)
+	_, _ = Inject[Config](parent)
+	_, _ = Inject[Config](parent)
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if callCounts["Config-provided-0"] != 1 {
+		t.Errorf("expected provided-0 called 1 time (first injection), got %d", callCounts["Config-provided-0"])
+	}
+	if callCounts["Config-provided-1"] != 1 {
+		t.Errorf("expected provided-1 called 1 time (second injection), got %d", callCounts["Config-provided-1"])
+	}
+	if callCounts["Config-provided-2"] != 1 {
+		t.Errorf("expected provided-2 called 1 time (third injection), got %d", callCounts["Config-provided-2"])
+	}
+}
+
+func TestNestedContainer_Hook_FourLevelDeep(t *testing.T) {
+	type L1 struct{ V string }
+	type L2 struct{ V string }
+	type L3 struct{ V string }
+	type L4 struct{ V string }
+
+	c1 := &Container{}
+	c1.MustAdd(Provide(L1{V: "level1"}))
+
+	c2 := &Container{}
+	c2.MustAdd(c1, Provide(L2{V: "level2"}))
+
+	c3 := &Container{}
+	c3.MustAdd(c2, Provide(L3{V: "level3"}))
+
+	c4 := &Container{}
+	c4.MustAdd(c3, Provide(L4{V: "level4"}))
+
+	hookCalls := make(map[string]int)
+	var mu sync.Mutex
+
+	exec := c4.Hook("init", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch v.(type) {
+			case L1:
+				hookCalls["L1"]++
+			case L2:
+				hookCalls["L2"]++
+			case L3:
+				hookCalls["L3"]++
+			case L4:
+				hookCalls["L4"]++
+			}
+		}
+	})
+
+	_, _ = Inject[L1](c4)
+	_, _ = Inject[L2](c4)
+	_, _ = Inject[L3](c4)
+	_, _ = Inject[L4](c4)
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if hookCalls["L1"] != 1 || hookCalls["L2"] != 1 || hookCalls["L3"] != 1 || hookCalls["L4"] != 1 {
+		t.Errorf("expected all types called once, got %+v", hookCalls)
+	}
+}
+
+func TestNestedContainer_Hook_MultipleHooksSameContainer(t *testing.T) {
+	type Service struct{ Name string }
+
+	c := &Container{}
+	c.MustAdd(Provide(Service{Name: "test-service"}))
+
+	hook1Calls := 0
+	hook2Calls := 0
+	hook3Calls := 0
+
+	hook1 := c.Hook("phase1", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(Service); ok {
+				hook1Calls++
+			}
+		}
+	})
+
+	hook2 := c.Hook("phase2", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(Service); ok {
+				hook2Calls++
+			}
+		}
+	})
+
+	hook3 := c.Hook("phase3", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(Service); ok {
+				hook3Calls++
+			}
+		}
+	})
+
+	_, _ = Inject[Service](c)
+
+	ctx := context.Background()
+
+	hook1(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	hook2(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	hook3(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	if hook1Calls != 1 || hook2Calls != 1 || hook3Calls != 1 {
+		t.Errorf("expected all hooks called once, got h1=%d, h2=%d, h3=%d", hook1Calls, hook2Calls, hook3Calls)
+	}
+}
+
+func TestNestedContainer_Hook_HookOnceVsHook(t *testing.T) {
+	type Resource struct{ ID int }
+
+	c := &Container{}
+	c.MustAdd(Provide(Resource{ID: 100}))
+
+	hookCallCount := 0
+	hookOnceCallCount := 0
+
+	c.Hook("regular", func(v any, provided int) func(context.Context) {
+		if _, ok := v.(Resource); ok {
+			hookCallCount++
+		}
+		return func(ctx context.Context) {}
+	})
+
+	c.HookOnce("once", func(v any) func(context.Context) {
+		if _, ok := v.(Resource); ok {
+			hookOnceCallCount++
+		}
+		return func(ctx context.Context) {}
+	})
+
+	_, _ = Inject[Resource](c)
+	_, _ = Inject[Resource](c)
+	_, _ = Inject[Resource](c)
+
+	if hookCallCount != 3 {
+		t.Errorf("expected regular hook called 3 times, got %d", hookCallCount)
+	}
+
+	if hookOnceCallCount != 1 {
+		t.Errorf("expected HookOnce called 1 time, got %d", hookOnceCallCount)
+	}
+}
+
+func TestNestedContainer_Hook_SharedDependency(t *testing.T) {
+	type DB struct{ Connection string }
+	type ServiceA struct{ DB DB }
+	type ServiceB struct{ DB DB }
+
+	c := &Container{}
+	c.MustAdd(
+		Provide(DB{Connection: "postgres://localhost"}),
+		Build(func(c *Container) (ServiceA, error) {
+			db, _ := Inject[DB](c)
+			return ServiceA{DB: db}, nil
+		}),
+		Build(func(c *Container) (ServiceB, error) {
+			db, _ := Inject[DB](c)
+			return ServiceB{DB: db}, nil
+		}),
+	)
+
+	dbUsageCount := 0
+
+	c.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		if _, ok := v.(DB); ok {
+			dbUsageCount++
+		}
+		return func(ctx context.Context) {}
+	})
+
+	_, _ = Inject[ServiceA](c)
+	_, _ = Inject[ServiceB](c)
+
+	exec := c.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {}
+	})
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if dbUsageCount != 1 {
+		t.Errorf("expected DB hook called 1 time (singleton), got %d", dbUsageCount)
+	}
+}
+
+func TestNestedContainer_Hook_ContextPropagation(t *testing.T) {
+	type Token struct{ Value string }
+
+	parent := &Container{}
+	parent.MustAdd(Provide(Token{Value: "parent-token"}))
+
+	child := &Container{}
+	child.MustAdd(parent)
+
+	type contextKey string
+	const key contextKey = "trace"
+
+	child.Hook("trace", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			trace, _ := ctx.Value(key).([]string)
+			if len(trace) == 0 {
+				t.Error("expected context to carry trace information")
+			}
+		}
+	})
+
+	_, _ = Inject[Token](child)
+
+	exec := child.Hook("trace", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {}
+	})
+
+	trace := []string{"request-1", "request-2"}
+	ctx := context.WithValue(context.Background(), key, trace)
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+}
+
+func TestNestedContainer_Hook_DiamondDependency(t *testing.T) {
+	type Base struct{ Name string }
+	type Left struct{ Base Base }
+	type Right struct{ Base Base }
+	type Top struct {
+		Left  Left
+		Right Right
+	}
+
+	c := &Container{}
+	c.MustAdd(
+		Provide(Base{Name: "shared-base"}),
+		Build(func(c *Container) (Left, error) {
+			base, _ := Inject[Base](c)
+			return Left{Base: base}, nil
+		}),
+		Build(func(c *Container) (Right, error) {
+			base, _ := Inject[Base](c)
+			return Right{Base: base}, nil
+		}),
+		Build(func(c *Container) (Top, error) {
+			left, _ := Inject[Left](c)
+			right, _ := Inject[Right](c)
+			return Top{Left: left, Right: right}, nil
+		}),
+	)
+
+	baseHookCalls := 0
+
+	c.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		if _, ok := v.(Base); ok {
+			baseHookCalls++
+		}
+		return func(ctx context.Context) {}
+	})
+
+	_, _ = Inject[Top](c)
+
+	exec := c.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {}
+	})
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if baseHookCalls != 1 {
+		t.Errorf("expected Base hook called 1 time (diamond dependency), got %d", baseHookCalls)
+	}
+}
+
+// ============== Nested Container Comprehensive Tests ==============
+
+func TestNestedContainer_CircularDependencyDetection(t *testing.T) {
+	type ServiceA struct{}
+	type ServiceB struct{}
+
+	child := &Container{}
+	child.MustAdd(
+		Build(func(c *Container) (ServiceA, error) {
+			_, err := Inject[ServiceB](c)
+			return ServiceA{}, err
+		}),
+	)
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(
+		Build(func(c *Container) (ServiceB, error) {
+			_, err := Inject[ServiceA](c)
+			return ServiceB{}, err
+		}),
+	)
+
+	_, err := Inject[ServiceA](parent)
+	if err == nil {
+		t.Fatal("expected circular dependency error")
+	}
+}
+
+func TestNestedContainer_ErrorPropagation(t *testing.T) {
+	type Config struct{ Value string }
+	type Service struct{}
+
+	infra := &Container{}
+	infra.MustAdd(
+		Build(func(c *Container) (Config, error) {
+			return Config{}, fmt.Errorf("infra error")
+		}),
+	)
+
+	app := &Container{}
+	app.MustAdd(infra)
+	app.MustAdd(
+		Build(func(c *Container) (Service, error) {
+			_, err := Inject[Config](c)
+			if err != nil {
+				return Service{}, fmt.Errorf("wrapped: %w", err)
+			}
+			return Service{}, nil
+		}),
+	)
+
+	_, err := Inject[Service](app)
+	if err == nil {
+		t.Fatal("expected error propagation")
+	}
+}
+
+func TestNestedContainer_BuildDependencyChain(t *testing.T) {
+	type L1 struct{ V int }
+	type L2 struct{ V int }
+	type L3 struct{ V int }
+
+	infra := &Container{}
+	infra.MustAdd(
+		Build(func(c *Container) (L1, error) {
+			return L1{V: 1}, nil
+		}),
+	)
+
+	services := &Container{}
+	services.MustAdd(infra)
+	services.MustAdd(
+		Build(func(c *Container) (L2, error) {
+			l1, _ := Inject[L1](c)
+			return L2{V: l1.V + 1}, nil
+		}),
+	)
+
+	app := &Container{}
+	app.MustAdd(services)
+	app.MustAdd(
+		Build(func(c *Container) (L3, error) {
+			l2, _ := Inject[L2](c)
+			return L3{V: l2.V + 1}, nil
+		}),
+	)
+
+	l3, err := Inject[L3](app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l3.V != 3 {
+		t.Errorf("expected L3.V=3, got %d", l3.V)
+	}
+}
+
+func TestNestedContainer_TypeAliases(t *testing.T) {
+	type StringAlias string
+	type IntAlias int
+
+	child := &Container{}
+	child.MustAdd(Provide(StringAlias("alias-value")))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(
+		Build(func(c *Container) (IntAlias, error) {
+			s, _ := Inject[StringAlias](c)
+			return IntAlias(len(s)), nil
+		}),
+	)
+
+	v, err := Inject[IntAlias](parent)
+	if err != nil || v != 11 {
+		t.Errorf("expected 11, got %d", v)
+	}
+}
+
+func TestNestedContainer_MixedProvideAndBuild(t *testing.T) {
+	type Config struct{ Value string }
+	type Service struct{ Config Config }
+
+	infra := &Container{}
+	infra.MustAdd(Provide(Config{Value: "from-infra"}))
+
+	app := &Container{}
+	app.MustAdd(infra)
+	app.MustAdd(
+		Build(func(c *Container) (Service, error) {
+			cfg, _ := Inject[Config](c)
+			return Service{Config: cfg}, nil
+		}),
+	)
+
+	svc, err := Inject[Service](app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Config.Value != "from-infra" {
+		t.Errorf("expected 'from-infra', got %s", svc.Config.Value)
+	}
+}
+
+func TestNestedContainer_CrossDependencies(t *testing.T) {
+	type IntDep int
+	type StringDep string
+
+	child := &Container{}
+	child.MustAdd(
+		Build(func(c *Container) (IntDep, error) {
+			return IntDep(42), nil
+		}),
+	)
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(
+		Build(func(c *Container) (StringDep, error) {
+			i, _ := Inject[IntDep](c)
+			return StringDep(fmt.Sprintf("got-%d", i)), nil
+		}),
+	)
+
+	s, err := Inject[StringDep](parent)
+	if err != nil || s != "got-42" {
+		t.Errorf("expected got-42, got %v", s)
+	}
+}
+
+func TestNestedContainer_DeepChain(t *testing.T) {
+	type L1 int
+	type L2 int
+	type L3 int
+
+	infra := &Container{}
+	infra.MustAdd(
+		Build(func(c *Container) (L1, error) {
+			return L1(1), nil
+		}),
+	)
+
+	middle := &Container{}
+	middle.MustAdd(infra)
+	middle.MustAdd(
+		Build(func(c *Container) (L2, error) {
+			v, _ := Inject[L1](c)
+			return L2(v + 1), nil
+		}),
+	)
+
+	app := &Container{}
+	app.MustAdd(middle)
+	app.MustAdd(
+		Build(func(c *Container) (L3, error) {
+			v, _ := Inject[L2](c)
+			return L3(v * 10), nil
+		}),
+	)
+
+	v, err := Inject[L3](app)
+	if err != nil || v != 20 {
+		t.Errorf("expected 20, got %v", v)
+	}
+}
+
+func TestNestedContainer_SharedSingleton(t *testing.T) {
+	type DB struct{ ID int }
+
+	callCount := 0
+
+	infra := &Container{}
+	infra.MustAdd(
+		Build(func(c *Container) (DB, error) {
+			callCount++
+			return DB{ID: 1}, nil
+		}),
+	)
+
+	services := &Container{}
+	services.MustAdd(infra)
+
+	app := &Container{}
+	app.MustAdd(services)
+
+	_, _ = Inject[DB](app)
+	_, _ = Inject[DB](app)
+	_, _ = Inject[DB](app)
+
+	if callCount != 1 {
+		t.Errorf("expected DB built once (singleton), got %d calls", callCount)
+	}
+}
+
+func TestNestedContainer_ContainerFreezing(t *testing.T) {
+	type Config struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(Config{Value: 1}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	err := child.Add(Provide(Config{Value: 2}))
+	if err == nil {
+		t.Fatal("expected container frozen error")
+	}
+}
+
+func TestNestedContainer_DuplicatePrevention(t *testing.T) {
+	type Config struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(Config{Value: 1}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	err := parent.Add(Provide(Config{Value: 2}))
+	if err == nil {
+		t.Fatal("expected duplicate prevention error")
+	}
+}
+
+func TestNestedContainer_ProvideMethod(t *testing.T) {
+	type DB struct{ DSN string }
+	type Cache struct{ Addr string }
+
+	infra := &Container{}
+	infra.MustAdd(Provide(DB{DSN: "mysql://localhost"}))
+
+	app := &Container{}
+	app.MustAdd(infra)
+	app.MustAdd(Provide(Cache{Addr: "redis://localhost"}))
+
+	db := DB{}
+	cache := Cache{}
+	other := struct{ Name string }{}
+
+	if _, ok := app.Provide(&db); !ok {
+		t.Error("expected app to provide DB from child")
+	}
+	if _, ok := app.Provide(&cache); !ok {
+		t.Error("expected app to provide Cache")
+	}
+	if _, ok := app.Provide(&other); ok {
+		t.Error("expected app to not provide unknown type")
+	}
+}
+
+func TestNestedContainer_Hook_WithBuildError(t *testing.T) {
+	type Config struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(
+		Build(func(c *Container) (Config, error) {
+			return Config{}, fmt.Errorf("build error")
+		}),
+	)
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	hookCalled := false
+	parent.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			hookCalled = true
+		}
+	})
+
+	_, err := Inject[Config](parent)
+	if err == nil {
+		t.Fatal("expected build error")
+	}
+
+	exec := parent.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {}
+	})
+
+	exec(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+
+	if hookCalled {
+		t.Error("expected hook not called on build error")
+	}
+}
+
+func TestNestedContainer_MultipleChildren(t *testing.T) {
+	type DB struct{ DSN string }
+	type Cache struct{ Addr string }
+
+	dbContainer := &Container{}
+	dbContainer.MustAdd(Provide(DB{DSN: "mysql://localhost"}))
+
+	cacheContainer := &Container{}
+	cacheContainer.MustAdd(Provide(Cache{Addr: "redis://localhost"}))
+
+	app := &Container{}
+	app.MustAdd(dbContainer, cacheContainer)
+
+	db, err := Inject[DB](app)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache, err := Inject[Cache](app)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if db.DSN != "mysql://localhost" {
+		t.Errorf("expected mysql://localhost, got %s", db.DSN)
+	}
+	if cache.Addr != "redis://localhost" {
+		t.Errorf("expected redis://localhost, got %s", cache.Addr)
+	}
+}
+
+func TestNestedContainer_Hook_PropagationOrder(t *testing.T) {
+	type Token struct{ Value string }
+
+	infra := &Container{}
+	infra.MustAdd(Provide(Token{Value: "infra-token"}))
+
+	services := &Container{}
+	services.MustAdd(infra)
+
+	app := &Container{}
+	app.MustAdd(services)
+
+	executionOrder := make([]string, 0)
+
+	infraHook := infra.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			executionOrder = append(executionOrder, "infra")
+		}
+	})
+
+	servicesHook := services.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			executionOrder = append(executionOrder, "services")
+		}
+	})
+
+	appHook := app.Hook("track", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			executionOrder = append(executionOrder, "app")
+		}
+	})
+
+	_, _ = Inject[Token](app)
+
+	infraHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
+	servicesHook(func(hooks []func(context.Context)) {
+		for _, fn := range hooks {
+			fn(context.Background())
+		}
+	})
 	appHook(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(context.Background())
 		}
 	})
 
-	// Output:
-	// [Infra] DB starting
-	// [Infra] Cache starting
-	// [App] DB starting
+	if len(executionOrder) != 3 {
+		t.Errorf("expected 3 hook executions, got %d", len(executionOrder))
+	}
 }

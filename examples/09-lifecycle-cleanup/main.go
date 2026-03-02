@@ -146,12 +146,7 @@ func main() {
 	defer shutdownCancel()
 
 	fmt.Println("\n=== Starting Shutdown ===")
-	shutdown(func(hooks []func(context.Context)) {
-		// Execute hooks in reverse order (LIFO)
-		for i := len(hooks) - 1; i >= 0; i-- {
-			hooks[i](shutdownCtx)
-		}
-	})
+	shutdown.Iterate(shutdownCtx, true) // true = reverse order (LIFO)
 	fmt.Println("=== Shutdown Complete ===")
 
 	fmt.Println("\n=== Demo Complete ===")

@@ -39,11 +39,17 @@ db, _ := godi.Inject[Database](c)
 cfg, _ := godi.Inject[Config](c)
 
 ctx := context.Background()
+
+// Option 1: Manual iteration
 startup(func(hooks []func(context.Context)) {
     for _, fn := range hooks {
         fn(ctx)
     }
 })
+
+// Option 2: Using Iterate helper (recommended)
+startup.Iterate(ctx, false) // false = forward order
+shutdown.Iterate(ctx, true) // true = reverse order (LIFO for cleanup)
 ```
 
 ## Running the Example
@@ -77,17 +83,28 @@ Use hooks for:
 ### Hook
 
 ```go
-func (c *Container) Hook(name string, build func(v any, provided int) func(context.Context)) func(func([]func(context.Context)))
+func (c *Container) Hook(name string, build func(v any, provided int) func(context.Context)) Hooks
 ```
 
 - `v`: The injected value
 - `provided`: Number of times this value has been provided (0 = first time)
 - Return `nil` to skip hook execution
+- Returns `Hooks` type with `Iterate(ctx, reverse)` method
 
 ### HookOnce
 
 ```go
-func (c *Container) HookOnce(name string, build func(v any) func(context.Context)) func(func([]func(context.Context)))
+func (c *Container) HookOnce(name string, build func(v any) func(context.Context)) Hooks
 ```
 
-Automatically skips execution after first provision.
+Automatically skips execution after first provision. Returns `Hooks` type.
+
+### Hooks.Iterate
+
+```go
+func (h Hooks) Iterate(ctx context.Context, reverse bool)
+```
+
+Executes all registered hooks:
+- `reverse=false`: Forward order (registration order)
+- `reverse=true`: Reverse order (LIFO, ideal for cleanup/shutdown)

@@ -39,12 +39,15 @@ c.MustAdd(
 shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
+// Option 1: Manual iteration (reverse order)
 shutdown(func(hooks []func(context.Context)) {
-    // Execute hooks in reverse order (LIFO)
     for i := len(hooks) - 1; i >= 0; i-- {
         hooks[i](shutdownCtx)
     }
 })
+
+// Option 2: Using Iterate helper (recommended)
+shutdown.Iterate(shutdownCtx, true) // true = reverse order (LIFO)
 ```
 
 ## Running the Example

@@ -19,6 +19,11 @@ This example demonstrates a production-ready Go web application structure using 
 - Easy to swap implementations
 - Facilitates mocking for tests
 
+### 4. Hook-based Lifecycle Management
+- Automatic cleanup via `HookOnce`
+- No manual lifecycle manager needed
+- Type-safe resource cleanup
+
 ## Directory Structure
 
 ```
@@ -98,7 +103,17 @@ examples/09-web-app/
 ## Dependency Injection Setup
 
 ```go
-// wire.go - Register abstractions, not concretions
+// wire.go - Register abstractions and shutdown hooks
+
+// Register shutdown hook using HookOnce
+shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+    return func(ctx context.Context) {
+        // Execute cleanup for closable resources using interface
+        if closer, ok := v.(interface{ Close() error }); ok {
+            closer.Close()
+        }
+    }
+})
 
 // Infrastructure layer - returns interfaces
 c.Add(godi.Build(func() (interfaces.Database, error) {
@@ -110,13 +125,6 @@ c.Add(godi.Build(func() (interfaces.Database, error) {
 c.Add(godi.Build(func() (repository.UserRepositoryInterface, error) {
     db, _ := godi.ShouldInject[interfaces.Database](c)
     return repository.NewUserRepository(db), nil
-}))
-
-// Service layer - depends on interfaces
-c.Add(godi.Build(func() (service.UserServiceInterface, error) {
-    repo, _ := godi.ShouldInject[repository.UserRepositoryInterface](c)
-    cache, _ := godi.ShouldInject[interfaces.Cache](c)
-    return service.NewUserService(repo, cache), nil
 }))
 ```
 
@@ -133,15 +141,23 @@ go run cmd/main.go
 === Web Application Example ===
 Best Practices: Separation of Concerns
 
-✓ Container created (Build loading)
+✓ Container created
 ✓ Using Dependency Inversion Principle
+✓ Shutdown hooks registered via HookOnce
+[Infrastructure] Database connection established: postgres://localhost:5432/mydb
+[Infrastructure] Cache client connected: redis://localhost:6379
 ✓ All dependencies injected
 
 Starting WebApp on port 8080
 Debug mode: enabled
 [DEBUG] Request started
 Handler: Got user User from DB
-[DEBUG] Request completed in 29.791µs
+[DEBUG] Request completed in 15.291µs
+
+=== Starting Graceful Shutdown ===
+[Infrastructure] Cache client disconnected: redis://localhost:6379
+[Infrastructure] Database connection closed: postgres://localhost:5432/mydb
+=== Shutdown Complete ===
 
 === Demo Complete ===
 ```
@@ -191,6 +207,7 @@ type Cache interface {
     Get(key string) (interface{}, error)
     Set(key string, value interface{}, ttl int) error
     Delete(key string) error
+    Close() error
 }
 
 type Handler interface {
@@ -209,4 +226,5 @@ type Middleware interface {
 3. ✅ **Single Responsibility** - Each package has one reason to change
 4. ✅ **Explicit Dependencies** - All dependencies are clearly declared
 5. ✅ **Build Initialization** - Resources created only when needed
-6. ✅ **English Documentation** - All code documented in English
+6. ✅ **Hook-based Cleanup** - Automatic resource cleanup via `HookOnce`
+7. ✅ **English Documentation** - All code documented in English

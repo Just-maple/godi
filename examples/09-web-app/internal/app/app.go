@@ -2,11 +2,9 @@
 package app
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/Just-maple/godi/examples/09-web-app/internal/config"
-	"github.com/Just-maple/godi/examples/09-web-app/internal/lifecycle"
 	"github.com/Just-maple/godi/examples/09-web-app/pkg/interfaces"
 )
 
@@ -17,7 +15,6 @@ type App struct {
 	router     *Router
 	handler    interfaces.Handler
 	middleware []interfaces.Middleware
-	lifecycle  *lifecycle.Lifecycle
 }
 
 // NewApp creates a new application instance
@@ -27,14 +24,12 @@ func NewApp(
 	router *Router,
 	handler interfaces.Handler,
 	mw interfaces.Middleware,
-	lc *lifecycle.Lifecycle,
 ) *App {
 	return &App{
 		config:     cfg,
 		router:     router,
 		handler:    mw.Process(handler),
 		middleware: []interfaces.Middleware{mw},
-		lifecycle:  lc,
 	}
 }
 
@@ -45,13 +40,7 @@ func (a *App) Start() error {
 		fmt.Println("Debug mode: enabled")
 	}
 
-	ctx := context.Background()
-	return a.handler.Handle(ctx)
-}
-
-// Shutdown performs graceful shutdown
-func (a *App) Shutdown(ctx context.Context) error {
-	return a.lifecycle.Shutdown(ctx)
+	return a.handler.Handle(nil)
 }
 
 // Router holds routing configuration

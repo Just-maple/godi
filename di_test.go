@@ -1,6 +1,7 @@
 package godi
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -1327,4 +1328,184 @@ func BenchmarkContainer_Add(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestHook(t *testing.T) {
+	c := &Container{}
+
+	startupCalled := 0
+	shutdownCalled := 0
+
+	startup := c.Hook("startup", func(v any, called int) HookFunc {
+		if called > 0 {
+			return nil
+		}
+		if _, ok := v.(Database); ok {
+			return func(ctx context.Context) {
+				startupCalled++
+			}
+		}
+		if _, ok := v.(Config); ok {
+			return func(ctx context.Context) {
+				startupCalled++
+			}
+		}
+		return nil
+	})
+
+	shutdown := c.Hook("shutdown", func(v any, called int) HookFunc {
+		if called > 0 {
+			return nil
+		}
+		if _, ok := v.(Database); ok {
+			return func(ctx context.Context) {
+				shutdownCalled++
+			}
+		}
+		if _, ok := v.(Config); ok {
+			return func(ctx context.Context) {
+				shutdownCalled++
+			}
+		}
+		return nil
+	})
+
+	c.MustAdd(
+		Provide(Database{DSN: "mysql://localhost"}),
+		Provide(Config{AppName: "test-app"}),
+	)
+
+	ctx := context.Background()
+
+	_, _ = Inject[Database](c)
+	_, _ = Inject[Config](c)
+
+	startup(func(hooks []HookFunc) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	if startupCalled != 2 {
+		t.Errorf("expected startupCalled=2, got %d", startupCalled)
+	}
+
+	shutdown(func(hooks []HookFunc) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	if shutdownCalled != 2 {
+		t.Errorf("expected shutdownCalled=2, got %d", shutdownCalled)
+	}
+}
+
+func TestHook_WithBuild(t *testing.T) {
+	c := &Container{}
+
+	buildCalled := 0
+	hookCalled := 0
+
+	c.MustAdd(
+		Build(func(c *Container) (Database, error) {
+			buildCalled++
+			return Database{DSN: "mysql://localhost"}, nil
+		}),
+	)
+
+	h := c.Hook("init", func(v any, provided int) HookFunc {
+		if provided > 0 {
+			return nil
+		}
+		if _, ok := v.(Database); ok {
+			return func(ctx context.Context) {
+				hookCalled++
+			}
+		}
+		return nil
+	})
+
+	ctx := context.Background()
+	_, _ = Inject[Database](c)
+
+	h(func(hooks []HookFunc) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	if buildCalled != 1 {
+		t.Errorf("expected buildCalled=1, got %d", buildCalled)
+	}
+	if hookCalled != 1 {
+		t.Errorf("expected hookCalled=1, got %d", hookCalled)
+	}
+}
+
+func TestHook_MultipleContainers(t *testing.T) {
+	c1, c2 := &Container{}, &Container{}
+
+	c1.MustAdd(Provide(Database{DSN: "db1"}))
+	c2.MustAdd(Provide(Config{AppName: "app2"}))
+
+	h1 := c1.Hook("init", func(v any, provided int) HookFunc {
+		return func(ctx context.Context) {}
+	})
+
+	h2 := c2.Hook("init", func(v any, provided int) HookFunc {
+		return func(ctx context.Context) {}
+	})
+
+	if h1 == nil || h2 == nil {
+		t.Error("expected non-nil hook executors")
+	}
+}
+
+func ExampleHook() {
+	c := &Container{}
+	c.MustAdd(
+		Provide(Database{DSN: "mysql://localhost"}),
+		Provide(Config{AppName: "my-app"}),
+	)
+
+	startup := c.Hook("startup", func(v any, provided int) HookFunc {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			fmt.Printf("Starting: %T\n", v)
+		}
+	})
+
+	shutdown := c.Hook("shutdown", func(v any, provided int) HookFunc {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			fmt.Printf("Stopping: %T\n", v)
+		}
+	})
+
+	ctx := context.Background()
+
+	_, _ = Inject[Database](c)
+	_, _ = Inject[Config](c)
+
+	startup(func(hooks []HookFunc) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+
+	shutdown(func(hooks []HookFunc) {
+		for _, fn := range hooks {
+			fn(ctx)
+		}
+	})
+	// Output:
+	// Starting: godi.Database
+	// Starting: godi.Config
+	// Stopping: godi.Database
+	// Stopping: godi.Config
 }

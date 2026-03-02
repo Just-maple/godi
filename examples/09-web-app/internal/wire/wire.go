@@ -12,7 +12,6 @@ import (
 	"github.com/Just-maple/godi/examples/09-web-app/internal/config"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/handler"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/infrastructure"
-	"github.com/Just-maple/godi/examples/09-web-app/internal/lifecycle"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/middleware"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/repository"
 	"github.com/Just-maple/godi/examples/09-web-app/internal/service"
@@ -24,14 +23,22 @@ import (
 func NewAppContainer() *godi.Container {
 	c := &godi.Container{}
 
-	// Register lifecycle manager first (used by all other components)
-	appLifecycle := lifecycle.New("WebApp")
+	// Register shutdown hook using HookOnce for automatic single execution
+	shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+		return func(ctx context.Context) {
+			// Execute cleanup for closable resources using interface assertion
+			if closer, ok := v.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					fmt.Printf("[Cleanup] Error closing %T: %v\n", v, err)
+				}
+			}
+		}
+	})
 
 	// Register Config (concrete type - no interface needed for config)
 	// Register Infrastructure (Build with cleanup hooks)
 	// Note: We register concrete types but depend on interfaces in upper layers
 	c.MustAdd(
-		godi.Provide(appLifecycle),
 		godi.Provide(config.NewConfig()),
 		godi.Build(func(c *godi.Container) (interfaces.Database, error) {
 			cfg, err := godi.Inject[*config.Config](c)
@@ -39,15 +46,6 @@ func NewAppContainer() *godi.Container {
 				return nil, err
 			}
 			db := infrastructure.NewDBConnection(cfg.DatabaseDSN)
-
-			// Register cleanup hook - will be called on shutdown
-			appLifecycle.AddShutdownHook(func(ctx context.Context) error {
-				if closer, ok := db.(interface{ Close() error }); ok {
-					return closer.Close()
-				}
-				return nil
-			})
-
 			return db, nil
 		}),
 		godi.Build(func(c *godi.Container) (interfaces.Cache, error) {
@@ -56,15 +54,6 @@ func NewAppContainer() *godi.Container {
 				return nil, err
 			}
 			cache := infrastructure.NewCacheClient(cfg.CacheAddr)
-
-			// Register cleanup hook - will be called on shutdown
-			appLifecycle.AddShutdownHook(func(ctx context.Context) error {
-				if closer, ok := cache.(interface{ Close() error }); ok {
-					return closer.Close()
-				}
-				return nil
-			})
-
 			return cache, nil
 		}),
 		godi.Build(func(c *godi.Container) (repository.UserRepositoryInterface, error) {
@@ -118,13 +107,12 @@ func NewAppContainer() *godi.Container {
 			if err != nil {
 				return nil, err
 			}
-			lc, err := godi.Inject[*lifecycle.Lifecycle](c)
-			if err != nil {
-				return nil, err
-			}
-			return app.NewApp(cfg, router, h, mw, lc), nil
+			return app.NewApp(cfg, router, h, mw), nil
 		}),
 	)
+
+	// Store shutdown executor in container for later retrieval
+	c.MustAdd(godi.Provide(shutdown))
 
 	return c
 }
@@ -134,11 +122,16 @@ func Run() error {
 	container := NewAppContainer()
 	fmt.Println("✓ Container created")
 	fmt.Println("✓ Using Dependency Inversion Principle")
-	fmt.Println("✓ Lifecycle hooks registered")
+	fmt.Println("✓ Shutdown hooks registered via HookOnce")
 
 	appInstance, err := godi.Inject[*app.App](container)
 	if err != nil {
 		return fmt.Errorf("failed to inject App: %w", err)
+	}
+
+	shutdown, err := godi.Inject[func(func([]godi.HookFunc))](container)
+	if err != nil {
+		return fmt.Errorf("failed to inject shutdown: %w", err)
 	}
 
 	fmt.Println("✓ All dependencies injected")
@@ -149,9 +142,18 @@ func Run() error {
 		return err
 	}
 
-	// Perform graceful shutdown
+	// Perform graceful shutdown using hooks
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	return appInstance.Shutdown(shutdownCtx)
+	fmt.Println("\n=== Starting Graceful Shutdown ===")
+	shutdown(func(hooks []godi.HookFunc) {
+		// Execute hooks in reverse order (LIFO)
+		for i := len(hooks) - 1; i >= 0; i-- {
+			hooks[i](shutdownCtx)
+		}
+	})
+	fmt.Println("=== Shutdown Complete ===")
+
+	return nil
 }

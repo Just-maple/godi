@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/Just-maple/godi"
 )
 
-// Lifecycle Cleanup Example: Demonstrates resource cleanup on shutdown
+// Lifecycle Cleanup Example: Demonstrates resource cleanup using Hook system
 // Shows how to register shutdown functions during initialization
 // and execute them in reverse order when the application exits
 
@@ -19,6 +18,7 @@ type Database struct {
 	closed bool
 }
 
+// Close implements io.Closer interface
 func (d *Database) Close() error {
 	d.closed = true
 	fmt.Printf("[Database] %s connection closed\n", d.name)
@@ -31,6 +31,7 @@ type Cache struct {
 	closed bool
 }
 
+// Close implements io.Closer interface
 func (c *Cache) Close() error {
 	c.closed = true
 	fmt.Printf("[Cache] %s connection closed\n", c.name)
@@ -42,6 +43,7 @@ type Service struct {
 	name string
 }
 
+// Shutdown implements shutdown interface
 func (s *Service) Shutdown(ctx context.Context) error {
 	fmt.Printf("[Service] %s shutting down gracefully\n", s.name)
 	select {
@@ -53,57 +55,18 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 }
 
-// Lifecycle manages the application lifecycle
-type Lifecycle struct {
-	hooks      []func(context.Context) error
-	hooksMutex sync.Mutex
-}
-
-// NewLifecycle creates a new lifecycle manager
-func NewLifecycle() *Lifecycle {
-	return &Lifecycle{
-		hooks: make([]func(context.Context) error, 0),
-	}
-}
-
-// AddShutdownHook adds a shutdown hook to be called on cleanup
-func (l *Lifecycle) AddShutdownHook(hook func(context.Context) error) {
-	l.hooksMutex.Lock()
-	defer l.hooksMutex.Unlock()
-	l.hooks = append(l.hooks, hook)
-}
-
-// Shutdown executes all shutdown hooks in reverse order
-func (l *Lifecycle) Shutdown(ctx context.Context) error {
-	l.hooksMutex.Lock()
-	defer l.hooksMutex.Unlock()
-
-	fmt.Println("\n=== Starting Shutdown ===")
-
-	for i := len(l.hooks) - 1; i >= 0; i-- {
-		if err := l.hooks[i](ctx); err != nil {
-			fmt.Printf("Shutdown hook %d error: %v\n", i, err)
-		}
-	}
-
-	fmt.Println("=== Shutdown Complete ===")
-	return nil
-}
-
 // App represents the main application
 type App struct {
-	db        *Database
-	cache     *Cache
-	service   *Service
-	lifecycle *Lifecycle
+	db      *Database
+	cache   *Cache
+	service *Service
 }
 
-func NewApp(db *Database, cache *Cache, service *Service, lifecycle *Lifecycle) *App {
+func NewApp(db *Database, cache *Cache, service *Service) *App {
 	return &App{
-		db:        db,
-		cache:     cache,
-		service:   service,
-		lifecycle: lifecycle,
+		db:      db,
+		cache:   cache,
+		service: service,
 	}
 }
 
@@ -120,32 +83,40 @@ func main() {
 	fmt.Println()
 
 	c := &godi.Container{}
-	lifecycle := NewLifecycle()
+
+	// Use HookOnce for automatic single execution cleanup
+	shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+		return func(ctx context.Context) {
+			// Handle closable resources
+			if closer, ok := v.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					fmt.Printf("[Cleanup] Error closing %T: %v\n", v, err)
+				}
+				return
+			}
+			// Handle shutdownable resources
+			if shutdowner, ok := v.(interface{ Shutdown(context.Context) error }); ok {
+				if err := shutdowner.Shutdown(ctx); err != nil {
+					fmt.Printf("[Cleanup] Error shutting down %T: %v\n", v, err)
+				}
+			}
+		}
+	})
 
 	c.MustAdd(
-		godi.Provide(lifecycle),
 		godi.Build(func(c *godi.Container) (*Database, error) {
 			db := &Database{name: "main-db"}
 			fmt.Printf("[Database] %s connected\n", db.name)
-			lifecycle.AddShutdownHook(func(ctx context.Context) error {
-				return db.Close()
-			})
 			return db, nil
 		}),
 		godi.Build(func(c *godi.Container) (*Cache, error) {
 			cache := &Cache{name: "redis-cache"}
 			fmt.Printf("[Cache] %s connected\n", cache.name)
-			lifecycle.AddShutdownHook(func(ctx context.Context) error {
-				return cache.Close()
-			})
 			return cache, nil
 		}),
 		godi.Build(func(c *godi.Container) (*Service, error) {
 			service := &Service{name: "user-service"}
 			fmt.Printf("[Service] %s initialized\n", service.name)
-			lifecycle.AddShutdownHook(func(ctx context.Context) error {
-				return service.Shutdown(ctx)
-			})
 			return service, nil
 		}),
 		godi.Build(func(c *godi.Container) (*App, error) {
@@ -161,11 +132,7 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
-			lc, err := godi.Inject[*Lifecycle](c)
-			if err != nil {
-				return nil, err
-			}
-			return NewApp(db, cache, service, lc), nil
+			return NewApp(db, cache, service), nil
 		}),
 	)
 
@@ -178,7 +145,14 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
-	_ = lifecycle.Shutdown(shutdownCtx)
+	fmt.Println("\n=== Starting Shutdown ===")
+	shutdown(func(hooks []godi.HookFunc) {
+		// Execute hooks in reverse order (LIFO)
+		for i := len(hooks) - 1; i >= 0; i-- {
+			hooks[i](shutdownCtx)
+		}
+	})
+	fmt.Println("=== Shutdown Complete ===")
 
 	fmt.Println("\n=== Demo Complete ===")
 }

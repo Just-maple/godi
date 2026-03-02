@@ -1,57 +1,55 @@
 # Lifecycle Cleanup Example
 
-Demonstrates resource cleanup and graceful shutdown using lifecycle hooks.
+Demonstrates resource cleanup and graceful shutdown using GoDI Hook system.
 
 ## What This Example Shows
 
-- Creating a lifecycle manager
-- Registering shutdown hooks during dependency initialization
-- Executing cleanup in reverse order
+- Using `HookOnce` for automatic single execution
+- Registering cleanup hooks during dependency initialization
+- Executing cleanup in reverse order (LIFO)
 - Graceful shutdown with context timeout
-- Constructor-based dependency assembly
 
 ## Key Concepts
 
 ```go
-// Lifecycle manager
-type Lifecycle struct {
-    hooks []func(context.Context) error
-}
+c := &godi.Container{}
 
-func (l *Lifecycle) AddShutdownHook(hook func(context.Context) error) {
-    l.hooks = append(l.hooks, hook)
-}
-
-func (l *Lifecycle) Shutdown(ctx context.Context) error {
-    // Execute hooks in reverse order
-    for i := len(l.hooks) - 1; i >= 0; i-- {
-        l.hooks[i](ctx)
+// Use HookOnce for automatic single execution cleanup
+shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+    return func(ctx context.Context) {
+        switch resource := v.(type) {
+        case *Database:
+            _ = resource.Close()
+        case *Cache:
+            _ = resource.Close()
+        case *Service:
+            _ = resource.Shutdown(ctx)
+        }
     }
-}
+})
 
-// Register dependencies with cleanup hooks
+// Register dependencies (hooks are automatically registered when injected)
 c.MustAdd(
-    godi.Provide(lifecycle),
     godi.Build(func(c *godi.Container) (*Database, error) {
         db := &Database{name: "main-db"}
-        lifecycle.AddShutdownHook(func(ctx context.Context) error {
-            return db.Close()
-        })
         return db, nil
     }),
-    godi.Build(func(c *godi.Container) (*App, error) {
-        db, _ := godi.Inject[*Database](c)
-        cache, _ := godi.Inject[*Cache](c)
-        service, _ := godi.Inject[*Service](c)
-        lc, _ := godi.Inject[*Lifecycle](c)
-        return NewApp(db, cache, service, lc), nil
+    godi.Build(func(c *godi.Container) (*Cache, error) {
+        cache := &Cache{name: "redis-cache"}
+        return cache, nil
     }),
 )
 
-// Graceful shutdown
+// Execute shutdown hooks in reverse order
 shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
-lifecycle.Shutdown(shutdownCtx)
+
+shutdown(func(hooks []godi.HookFunc) {
+    // Execute hooks in reverse order (LIFO)
+    for i := len(hooks) - 1; i >= 0; i-- {
+        hooks[i](shutdownCtx)
+    }
+})
 ```
 
 ## Running the Example
@@ -77,14 +75,16 @@ Press Ctrl+C or wait for timeout to shutdown
 [Cache] redis-cache connection closed
 [Database] main-db connection closed
 === Shutdown Complete ===
+
+=== Demo Complete ===
 ```
 
 ## Cleanup Order
 
 Hooks execute in **reverse order** (LIFO):
-1. Service shutdown (first registered, last to close)
+1. Service shutdown (first injected, last to close)
 2. Cache close
-3. Database close (last registered, first to close)
+3. Database close (last injected, first to close)
 
 ## When to Use
 
@@ -93,3 +93,12 @@ Hooks execute in **reverse order** (LIFO):
 - File handles
 - Background goroutines
 - Any resource requiring cleanup
+
+## Benefits vs Manual Lifecycle
+
+| Feature | Manual Lifecycle | Hook System |
+|---------|-----------------|-------------|
+| Registration | Explicit `AddShutdownHook` | Automatic on inject |
+| Type Safety | Manual type assertions | Type-safe switch |
+| Duplication | Manual prevention | Automatic via `HookOnce` |
+| Boilerplate | Lifecycle struct needed | Built-in to container |

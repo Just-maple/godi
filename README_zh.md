@@ -12,6 +12,7 @@
 - ✅ **多容器注入** - 支持跨容器查找
 - ✅ **并发安全** - 所有操作线程安全
 - ✅ **接口注入** - 支持依赖倒置原则
+- ✅ **Hook 系统** - 生命周期钩子管理初始化和清理
 
 ## 快速开始
 
@@ -245,6 +246,50 @@ c.MustAdd(
 len := godi.MustInject[Length](c) // 5
 ```
 
+### 9. Hook 生命周期管理
+
+```go
+c := godi.Container{}
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
+
+// Hook 带 provided 计数器 - 仅在首次提供时执行
+startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("Starting: %T\n", v)
+    }
+})
+
+// 或使用 HookOnce 自动单次执行
+shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+    return func(ctx context.Context) {
+        fmt.Printf("Stopping: %T\n", v)
+    }
+})
+
+db, _ := godi.Inject[Database](c)
+cfg, _ := godi.Inject[Config](c)
+
+ctx := context.Background()
+
+startup(func(hooks []godi.HookFunc) {
+    for _, fn := range hooks {
+        fn(ctx)
+    }
+})
+
+shutdown(func(hooks []godi.HookFunc) {
+    for _, fn := range hooks {
+        fn(ctx)
+    }
+})
+```
+
 ## 支持的类型
 
 - 结构体：`Database`, `Config`
@@ -289,6 +334,7 @@ go func() {
 | [10-lifecycle-cleanup](examples/10-lifecycle-cleanup/) | 生命周期管理 |
 | [11-chain](examples/11-chain/) | 依赖转换 |
 | [12-struct-field-inject](examples/12-struct-field-inject/) | 结构体字段注入 |
+| [13-hook](examples/13-hook/) | Hook 生命周期管理 |
 
 ## 与其他框架对比
 

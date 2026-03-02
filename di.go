@@ -18,7 +18,15 @@ func (p provider[T]) ID() any                            { return (*T)(nil) }
 func (p provider[T]) inject(c *Container, ptr any) error { return p(c, ptr) }
 
 func Provide[T any](v T) Provider {
-	return provider[T](func(_ *Container, p any) error { *p.(*T) = v; return nil })
+	return provider[T](func(c *Container, p any) error { return inject(c, p.(*T), v) })
+}
+
+func inject[T any](c *Container, p *T, v T) error {
+	*p = v
+	if c != nil {
+		c.hooks.Range(func(_, h any) bool { h.(*hook).check((*T)(nil), v); return true })
+	}
+	return nil
 }
 
 func Build[T any](f func(*Container) (T, error)) Provider {
@@ -31,8 +39,7 @@ func Build[T any](f func(*Container) (T, error)) Provider {
 		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
 			return fmt.Errorf("create %T error: %w", l.value, l.err)
 		}
-		*ptr.(*T) = l.value
-		return nil
+		return inject(c, ptr.(*T), l.value)
 	})
 }
 
@@ -52,7 +59,7 @@ func must(err error) {
 	}
 }
 
-type Container struct{ providers, injecting sync.Map }
+type Container struct{ providers, injecting, hooks sync.Map }
 
 func (c *Container) Add(ps ...Provider) error {
 	for _, p := range ps {

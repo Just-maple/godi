@@ -12,6 +12,7 @@ Lightweight Go dependency injection framework with generics. Zero reflection, ze
 - ✅ **Multi-Container Injection** - Cross-container lookup support
 - ✅ **Thread-Safe** - All operations are concurrent-safe
 - ✅ **Interface Injection** - Supports Dependency Inversion Principle
+- ✅ **Hook System** - Lifecycle hooks for initialization and cleanup
 
 ## Quick Start
 
@@ -245,6 +246,50 @@ c.MustAdd(
 len := godi.MustInject[Length](c) // 5
 ```
 
+### 9. Hook - Lifecycle Management
+
+```go
+c := godi.Container{}
+c.MustAdd(
+    godi.Provide(Database{DSN: "mysql://localhost"}),
+    godi.Provide(Config{AppName: "my-app"}),
+)
+
+// Hook with provided counter - only execute on first provision
+startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
+    if provided > 0 {
+        return nil
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("Starting: %T\n", v)
+    }
+})
+
+// Or use HookOnce for automatic single execution
+shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+    return func(ctx context.Context) {
+        fmt.Printf("Stopping: %T\n", v)
+    }
+})
+
+db, _ := godi.Inject[Database](c)
+cfg, _ := godi.Inject[Config](c)
+
+ctx := context.Background()
+
+startup(func(hooks []godi.HookFunc) {
+    for _, fn := range hooks {
+        fn(ctx)
+    }
+})
+
+shutdown(func(hooks []godi.HookFunc) {
+    for _, fn := range hooks {
+        fn(ctx)
+    }
+})
+```
+
 ## Supported Types
 
 - Structs: `Database`, `Config`
@@ -289,6 +334,7 @@ See [examples/](examples/) for complete examples:
 | [10-lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Lifecycle management |
 | [11-chain](examples/11-chain/) | Dependency transformation |
 | [12-struct-field-inject](examples/12-struct-field-inject/) | Struct field injection |
+| [13-hook](examples/13-hook/) | Hook lifecycle management |
 
 ## Comparison with Other Frameworks
 

@@ -85,7 +85,7 @@ func main() {
 	c := &godi.Container{}
 
 	// Use HookOnce for automatic single execution cleanup
-	shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
 		return func(ctx context.Context) {
 			// Handle closable resources
 			if closer, ok := v.(interface{ Close() error }); ok {
@@ -146,7 +146,7 @@ func main() {
 	defer shutdownCancel()
 
 	fmt.Println("\n=== Starting Shutdown ===")
-	shutdown(func(hooks []godi.HookFunc) {
+	shutdown(func(hooks []func(context.Context)) {
 		// Execute hooks in reverse order (LIFO)
 		for i := len(hooks) - 1; i >= 0; i-- {
 			hooks[i](shutdownCtx)

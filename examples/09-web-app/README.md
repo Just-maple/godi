@@ -106,7 +106,7 @@ examples/09-web-app/
 // wire.go - Register abstractions and shutdown hooks
 
 // Register shutdown hook using HookOnce
-shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         // Execute cleanup for closable resources using interface
         if closer, ok := v.(interface{ Close() error }); ok {

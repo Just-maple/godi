@@ -28,7 +28,7 @@ func main() {
 		godi.Provide(Service{Name: "user-service"}),
 	)
 
-	startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
+	startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
 		if provided > 0 {
 			return nil
 		}
@@ -37,10 +37,7 @@ func main() {
 		}
 	})
 
-	shutdown := c.Hook("shutdown", func(v any, provided int) godi.HookFunc {
-		if provided > 0 {
-			return nil
-		}
+	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
 		return func(ctx context.Context) {
 			fmt.Printf("Stopping: %T\n", v)
 		}
@@ -52,7 +49,7 @@ func main() {
 	db := godi.MustInject[Database](c)
 	svc := godi.MustInject[Service](c)
 
-	startup(func(hooks []godi.HookFunc) {
+	startup(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}
@@ -60,7 +57,7 @@ func main() {
 
 	fmt.Printf("Running: %s, %s, %s\n", cfg.AppName, db.DSN, svc.Name)
 
-	shutdown(func(hooks []godi.HookFunc) {
+	shutdown(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}

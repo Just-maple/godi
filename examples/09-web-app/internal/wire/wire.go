@@ -24,7 +24,7 @@ func NewAppContainer() *godi.Container {
 	c := &godi.Container{}
 
 	// Register shutdown hook using HookOnce for automatic single execution
-	shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
 		return func(ctx context.Context) {
 			// Execute cleanup for closable resources using interface assertion
 			if closer, ok := v.(interface{ Close() error }); ok {
@@ -129,7 +129,7 @@ func Run() error {
 		return fmt.Errorf("failed to inject App: %w", err)
 	}
 
-	shutdown, err := godi.Inject[func(func([]godi.HookFunc))](container)
+	shutdown, err := godi.Inject[func(func([]func(context.Context)))](container)
 	if err != nil {
 		return fmt.Errorf("failed to inject shutdown: %w", err)
 	}
@@ -147,7 +147,7 @@ func Run() error {
 	defer cancel()
 
 	fmt.Println("\n=== Starting Graceful Shutdown ===")
-	shutdown(func(hooks []godi.HookFunc) {
+	shutdown(func(hooks []func(context.Context)) {
 		// Execute hooks in reverse order (LIFO)
 		for i := len(hooks) - 1; i >= 0; i-- {
 			hooks[i](shutdownCtx)

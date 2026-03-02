@@ -22,9 +22,8 @@ func Provide[T any](v T) Provider {
 }
 
 func inject[T any](c *Container, p *T, v T) error {
-	*p = v
-	if c != nil {
-		c.hooks.Range(func(_, h any) bool { h.(*hook).check((*T)(nil), v); return true })
+	if *p = v; c != nil {
+		c.hooks.Range(func(_, h any) bool { h.(func(any, any))((*T)(nil), v); return true })
 	}
 	return nil
 }

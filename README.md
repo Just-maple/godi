@@ -1,20 +1,29 @@
 # Godi
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/Just-maple/godi.svg)](https://pkg.go.dev/github.com/Just-maple/godi)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Just-maple/godi)](https://goreportcard.com/report/github.com/Just-maple/godi)
 
-Lightweight Go dependency injection framework with generics. Zero reflection, zero code generation.
+Lightweight Go dependency injection framework built on generics. Zero reflection, zero code generation.
 
-## Features
+## 🚀 Features
 
-- ✅ **Generics** - Type-safe, no reflection
-- ✅ **Lazy Loading** - Dependencies initialized on first use
-- ✅ **Circular Dependency Detection** - Automatic runtime detection
-- ✅ **Multi-Container Injection** - Cross-container lookup support
-- ✅ **Thread-Safe** - All operations are concurrent-safe
-- ✅ **Interface Injection** - Supports Dependency Inversion Principle
-- ✅ **Hook System** - Lifecycle hooks for initialization and cleanup
+| Feature | Description |
+|---------|-------------|
+| **Type-Safe** | Full generics support, compile-time type checking |
+| **Lazy Loading** | Dependencies initialized on first use |
+| **Circular Detection** | Automatic runtime detection of circular dependencies |
+| **Multi-Container** | Cross-container dependency lookup |
+| **Thread-Safe** | All operations are concurrent-safe |
+| **Interface Support** | Full dependency inversion principle support |
+| **Hook System** | Lifecycle hooks for initialization and cleanup |
 
-## Quick Start
+## 📦 Installation
+
+```bash
+go get github.com/Just-maple/godi
+```
+
+## ⚡ Quick Start
 
 ```go
 package main
@@ -43,13 +52,19 @@ func main() {
     
     // Inject dependencies
     db := godi.MustInject[*Database](c)
-    println(db.Conn)
+    println(db.Conn) // Output: mysql://localhost
 }
 ```
 
-## Core API
+## 📖 Core API
 
-### Register Dependencies
+### Registration
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| `Provide(T)` | Register instance value | Simple values, configuration |
+| `Build(func) (T, error)` | Register factory function (lazy, singleton) | Complex initialization, lazy loading |
+| `Chain(func) (T, error)` | Derive from existing dependency | Transform/derive new types |
 
 ```go
 c := &godi.Container{}
@@ -68,89 +83,106 @@ c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
 }))
 ```
 
-### Inject Dependencies
+### Injection
+
+| Method | Returns | Panics | Use Case |
+|--------|---------|--------|----------|
+| `Inject[T](c)` | `(T, error)` | No | Standard injection |
+| `MustInject[T](c)` | `T` | Yes | Known to exist |
+| `InjectTo(&v, c)` | `error` | No | Inject to existing var |
+| `InjectAs(&v, c)` | `error` | No | Non-generic injection |
+| `c.Inject(&a, &b)` | `error` | No | Multi-injection |
 
 ```go
-// Inject - Returns typed value and error
+// Generic injection
 db, err := godi.Inject[*Database](c)
 
-// MustInject - Panics on failure
+// Panic on failure
 db := godi.MustInject[*Database](c)
 
-// InjectTo - Inject into existing variable (generic)
+// Inject to existing variable
 var db Database
 err := godi.InjectTo(&db, c)
 
-// MustInjectTo - Inject into existing variable, panics on failure
-godi.MustInjectTo(&db, c)
-
-// InjectAs - Inject into existing variable (non-generic)
-db = Database{}
-err = godi.InjectAs(&db, c)
-
-// MustInjectAs - Non-generic version with panic
-godi.MustInjectAs(&db, c)
-
-// Container.Inject - Inject multiple dependencies at once
+// Multi-injection
 service := &Service{}
-err = c.Inject(&service.DB, &service.Config, &service.Cache)
+err = c.Inject(&service.DB, &service.Config)
 ```
 
-### Multi-Container Injection
+### Lifecycle Hooks
 
 ```go
-db, err := godi.Inject[*Database](container1, container2, container3)
+c := &godi.Container{}
+
+// Hook with execution counter
+startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
+    if provided > 0 {
+        return nil // Skip if already called
+    }
+    return func(ctx context.Context) {
+        fmt.Printf("Starting: %T\n", v)
+    }
+})
+
+// HookOnce - automatic single execution
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        if closer, ok := v.(interface{ Close() error }); ok {
+            closer.Close()
+        }
+    }
+})
+
+// Execute hooks
+ctx := context.Background()
+shutdown(func(hooks []func(context.Context)) {
+    for _, fn := range hooks {
+        fn(ctx)
+    }
+})
 ```
 
-Searches containers in order, returns first match.
+## 📚 Usage Patterns
 
-## Usage Examples
-
-### 1. Struct Field Injection
+### 1. Constructor-Based Injection
 
 ```go
 type Service struct {
-    DB     Database
+    DB   Database
     Config Config
-    Cache  Cache
 }
 
-c := &godi.Container{}
 c.MustAdd(
     godi.Provide(Database{DSN: "mysql://localhost"}),
     godi.Provide(Config{AppName: "my-app"}),
-    godi.Provide(Cache{Addr: "redis://localhost"}),
+    godi.Build(func(c *godi.Container) (*Service, error) {
+        db, _ := godi.Inject[Database](c)
+        cfg, _ := godi.Inject[Config](c)
+        return &Service{DB: db, Config: cfg}, nil
+    }),
 )
+```
 
-// Inject directly into struct fields
+### 2. Field Injection
+
+```go
 service := &Service{}
 err := c.Inject(&service.DB, &service.Config, &service.Cache)
 ```
 
-### 2. Basic Injection
+### 3. Interface-Based (Dependency Inversion)
 
 ```go
-c := &godi.Container{}
-c.MustAdd(
-    godi.Provide(Config{DSN: "mysql://localhost"}),
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-)
+type Database interface {
+    Query(string) ([]Row, error)
+    Close() error
+}
 
-cfg, err := godi.Inject[Config](c)
-```
-
-### 3. Lazy Loading
-
-Factory executes only on first request, result is cached:
-
-```go
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    // Executes on first call
-    return sql.Open("mysql", dsn)
+c.Add(godi.Build(func(c *godi.Container) (Database, error) {
+    return NewMySQLDatabase(dsn), nil
 }))
 
-// Factory executes here
-db, err := godi.Inject[*Database](c)
+db, err := godi.Inject[Database](c)
 ```
 
 ### 4. Dependency Chains
@@ -158,62 +190,57 @@ db, err := godi.Inject[*Database](c)
 ```go
 c.MustAdd(
     godi.Provide(Config{DSN: "mysql://localhost"}),
-    
     godi.Build(func(c *godi.Container) (*Database, error) {
         cfg, _ := godi.Inject[Config](c)
         return NewDatabase(cfg.DSN)
     }),
-    
-    godi.Build(func(c *godi.Container) (*UserRepository, error) {
+    godi.Build(func(c *godi.Container) (*Repository, error) {
         db, _ := godi.Inject[*Database](c)
-        return NewUserRepository(db)
+        return NewRepository(db)
     }),
-    
-    godi.Build(func(c *godi.Container) (*UserService, error) {
-        repo, _ := godi.Inject[*UserRepository](c)
-        return NewUserService(repo)
+    godi.Build(func(c *godi.Container) (*Service, error) {
+        repo, _ := godi.Inject[*Repository](c)
+        return NewService(repo)
     }),
 )
-
-svc := godi.MustInject[*UserService](c)
 ```
 
-### 5. Circular Dependency Detection
+### 5. Graceful Shutdown with Hooks
 
 ```go
-type A struct{ B *B }
-type B struct{ A *A }
+c := &godi.Container{}
 
+// Register shutdown hook
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+    return func(ctx context.Context) {
+        if closer, ok := v.(interface{ Close() error }); ok {
+            closer.Close()
+        }
+    }
+})
+
+// Register resources
 c.MustAdd(
-    godi.Build(func(c *godi.Container) (A, error) {
-        b, _ := godi.Inject[B](c)
-        return A{B: b}, nil
+    godi.Build(func(c *godi.Container) (*Database, error) {
+        return NewDatabase("dsn")
     }),
-    godi.Build(func(c *godi.Container) (B, error) {
-        a, _ := godi.Inject[A](c)
-        return B{A: a}, nil
+    godi.Build(func(c *godi.Container) (*Cache, error) {
+        return NewCache("redis://localhost")
     }),
 )
 
-// Returns error: "circular dependency for main.A"
-_, err := godi.Inject[A](c)
+// Execute shutdown
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+shutdown(func(hooks []func(context.Context)) {
+    for i := len(hooks) - 1; i >= 0; i-- {
+        hooks[i](shutdownCtx)
+    }
+})
 ```
 
-### 6. Interface Injection
-
-```go
-type Database interface {
-    Query(string) ([]Row, error)
-}
-
-c.Add(godi.Build(func(c *godi.Container) (Database, error) {
-    return NewMySQLDatabase(dsn)
-}))
-
-db, err := godi.Inject[Database](c)
-```
-
-### 7. Testing with Mocks
+### 6. Testing with Mocks
 
 ```go
 // Production
@@ -230,7 +257,21 @@ test.Add(godi.Provide(&MockDatabase{Data: testData}))
 svc := NewUserService(db)
 ```
 
-### 8. Chain - Transform Dependencies
+### 7. Multi-Container Injection
+
+```go
+c1 := &godi.Container{}
+c2 := &godi.Container{}
+
+c1.MustAdd(godi.Provide(Database{DSN: "db1"}))
+c2.MustAdd(godi.Provide(Config{AppName: "app2"}))
+
+// Search containers in order
+db, err := godi.Inject[Database](c1, c2)
+cfg, err := godi.Inject[Config](c1, c2)
+```
+
+### 8. Transform with Chain
 
 ```go
 type Name string
@@ -246,105 +287,72 @@ c.MustAdd(
 len := godi.MustInject[Length](c) // 5
 ```
 
-### 9. Hook - Lifecycle Management
+## 🔧 Supported Types
 
-```go
-c := godi.Container{}
-c.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Provide(Config{AppName: "my-app"}),
-)
+- ✅ Structs: `Database`, `Config`
+- ✅ Primitives: `string`, `int`, `bool`, `float64`
+- ✅ Pointers: `*Database`
+- ✅ Slices: `[]string`
+- ✅ Maps: `map[string]int`
+- ✅ Interfaces: `any`, custom interfaces
+- ✅ Arrays: `[3]int`
+- ✅ Channels: `chan int`
+- ✅ Functions: `func() error`
 
-// Hook with provided counter - only execute on first provision
-startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) {
-        fmt.Printf("Starting: %T\n", v)
-    }
-})
+## 📊 Framework Comparison
 
-// Or use HookOnce for automatic single execution
-shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
-    return func(ctx context.Context) {
-        fmt.Printf("Stopping: %T\n", v)
-    }
-})
+| Feature | godi | dig/fx | wire | samber/do |
+|---------|------|--------|------|-----------|
+| **Type System** | Generics | Reflection | Code Gen | Generics |
+| **Runtime Errors** | No | Possible | No | Possible |
+| **Build Step** | No | No | Required | No |
+| **API Style** | Functional | Functional | Code Gen | Functional |
+| **Learning Curve** | Low | Medium | High | Low |
+| **Bundle Size** | Minimal | Medium | Large | Small |
+| **Lifecycle Hooks** | ✅ | ✅ | ❌ | ✅ |
+| **Multi-Container** | ✅ | ✅ (Scope) | ❌ | ✅ (Scope) |
+| **Circular Detection** | ✅ | ✅ | ✅ | ✅ |
+| **Lazy Loading** | ✅ | ✅ | ❌ | ✅ |
+| **Project Status** | Active | Active | ⚠️ Archived | Active |
 
-db, _ := godi.Inject[Database](c)
-cfg, _ := godi.Inject[Config](c)
+### When to Choose godi
 
-ctx := context.Background()
+- You prefer **compile-time safety** without code generation
+- You want **minimal dependencies** and small bundle size
+- You need **lifecycle management** for resources
+- You value **simple, intuitive API**
+- You work with **multiple containers** or modular architecture
 
-startup(func(hooks []godi.HookFunc) {
-    for _, fn := range hooks {
-        fn(ctx)
-    }
-})
+## 📁 Examples
 
-shutdown(func(hooks []godi.HookFunc) {
-    for _, fn := range hooks {
-        fn(ctx)
-    }
-})
-```
+Complete examples available in [`examples/`](examples/):
 
-## Supported Types
+| # | Example | Description |
+|---|---------|-------------|
+| 01 | [basic](examples/01-basic/) | Basic injection patterns |
+| 02 | [error-handling](examples/02-error-handling/) | Error handling strategies |
+| 03 | [must-inject](examples/03-must-inject/) | Panic-mode injection |
+| 04 | [all-types](examples/04-all-types/) | All supported types |
+| 05 | [multi-container](examples/05-multi-container/) | Cross-container injection |
+| 06 | [concurrent](examples/06-concurrent/) | Concurrent safety |
+| 07 | [generics](examples/07-generics/) | Advanced generics |
+| 08 | [testing-mock](examples/08-testing-mock/) | Mock testing patterns |
+| 09 | [web-app](examples/09-web-app/) | Production web app structure |
+| 10 | [lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Resource cleanup with hooks |
+| 11 | [chain](examples/11-chain/) | Dependency transformation |
+| 12 | [struct-field-inject](examples/12-struct-field-inject/) | Struct field injection |
+| 13 | [hook](examples/13-hook/) | Hook lifecycle management |
 
-- Structs: `Database`, `Config`
-- Primitives: `string`, `int`, `bool`, `float64`
-- Pointers: `*Database`
-- Slices: `[]string`
-- Maps: `map[string]int`
-- Interfaces: `any`, custom interfaces
-- Arrays: `[3]int`
-- Channels: `chan int`
-- Functions: `func() error`
+## 🤝 Contributing
 
-## Thread Safety
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-All container operations are thread-safe:
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-```go
-c := &godi.Container{}
-c.Add(godi.Provide(Database{DSN: "mysql://localhost"}))
+## 📄 License
 
-// Safe for concurrent injection
-go func() {
-    db, _ := godi.Inject[Database](c)
-}()
-```
-
-## Examples
-
-See [examples/](examples/) for complete examples:
-
-| Example | Description |
-|---------|-------------|
-| [01-basic](examples/01-basic/) | Basic injection |
-| [02-error-handling](examples/02-error-handling/) | Error handling |
-| [03-must-inject](examples/03-must-inject/) | Panic mode |
-| [04-all-types](examples/04-all-types/) | All supported types |
-| [05-multi-container](examples/05-multi-container/) | Multi-container injection |
-| [06-concurrent](examples/06-concurrent/) | Concurrent safety |
-| [07-generics](examples/07-generics/) | Generic injection |
-| [08-testing-mock](examples/08-testing-mock/) | Mock testing |
-| [09-web-app](examples/09-web-app/) | Web app best practices |
-| [10-lifecycle-cleanup](examples/10-lifecycle-cleanup/) | Lifecycle management |
-| [11-chain](examples/11-chain/) | Dependency transformation |
-| [12-struct-field-inject](examples/12-struct-field-inject/) | Struct field injection |
-| [13-hook](examples/13-hook/) | Hook lifecycle management |
-
-## Comparison with Other Frameworks
-
-| Framework | Approach | Characteristics |
-|-----------|----------|-----------------|
-| **dig/fx** (Uber) | Reflection | Runtime resolution, possible runtime errors |
-| **wire** (Google) | Code Generation | Compile-time resolution, requires build step |
-| **samber/do** | Generics + Reflection | Functional API |
-| **godi** | Pure Generics | Type-safe, no code generation, minimal API |
-
-## License
-
-MIT License
+MIT License - see [LICENSE](LICENSE) for details.

@@ -19,7 +19,7 @@ c.MustAdd(
 )
 
 // Hook with provided counter - only execute on first provision
-startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
+startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
     if provided > 0 {
         return nil // Skip if already called
     }
@@ -29,7 +29,7 @@ startup := c.Hook("startup", func(v any, provided int) godi.HookFunc {
 })
 
 // Or use HookOnce for automatic single execution
-shutdown := c.HookOnce("shutdown", func(v any, provided int) godi.HookFunc {
+shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         fmt.Printf("Stopping: %T\n", v)
     }
@@ -39,7 +39,7 @@ db, _ := godi.Inject[Database](c)
 cfg, _ := godi.Inject[Config](c)
 
 ctx := context.Background()
-startup(func(hooks []godi.HookFunc) {
+startup(func(hooks []func(context.Context)) {
     for _, fn := range hooks {
         fn(ctx)
     }
@@ -77,7 +77,7 @@ Use hooks for:
 ### Hook
 
 ```go
-func (c *Container) Hook(name string, build func(v any, provided int) HookFunc) func(func([]HookFunc))
+func (c *Container) Hook(name string, build func(v any, provided int) func(context.Context)) func(func([]func(context.Context)))
 ```
 
 - `v`: The injected value
@@ -87,7 +87,7 @@ func (c *Container) Hook(name string, build func(v any, provided int) HookFunc) 
 ### HookOnce
 
 ```go
-func (c *Container) HookOnce(name string, build func(v any, provided int) HookFunc) func(func([]HookFunc))
+func (c *Container) HookOnce(name string, build func(v any) func(context.Context)) func(func([]func(context.Context)))
 ```
 
 Automatically skips execution after first provision.

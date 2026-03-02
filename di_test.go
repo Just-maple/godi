@@ -1250,7 +1250,7 @@ func ExampleContainer_Inject() {
 	// Output: Injected: true, DB: mysql://localhost, App: my-app
 }
 
-func ExampleMultiContainer() {
+func Example_multiContainer() {
 	c1, c2 := &Container{}, &Container{}
 	c1.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
 	c2.MustAdd(Provide(Config{AppName: "multi-app"}))
@@ -1336,7 +1336,7 @@ func TestHook(t *testing.T) {
 	startupCalled := 0
 	shutdownCalled := 0
 
-	startup := c.Hook("startup", func(v any, called int) HookFunc {
+	startup := c.Hook("startup", func(v any, called int) func(context.Context) {
 		if called > 0 {
 			return nil
 		}
@@ -1353,10 +1353,7 @@ func TestHook(t *testing.T) {
 		return nil
 	})
 
-	shutdown := c.Hook("shutdown", func(v any, called int) HookFunc {
-		if called > 0 {
-			return nil
-		}
+	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
 		if _, ok := v.(Database); ok {
 			return func(ctx context.Context) {
 				shutdownCalled++
@@ -1378,9 +1375,11 @@ func TestHook(t *testing.T) {
 	ctx := context.Background()
 
 	_, _ = Inject[Database](c)
+	_, _ = Inject[Database](c)
+	_, _ = Inject[Config](c)
 	_, _ = Inject[Config](c)
 
-	startup(func(hooks []HookFunc) {
+	startup(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}
@@ -1390,7 +1389,7 @@ func TestHook(t *testing.T) {
 		t.Errorf("expected startupCalled=2, got %d", startupCalled)
 	}
 
-	shutdown(func(hooks []HookFunc) {
+	shutdown(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}
@@ -1414,7 +1413,7 @@ func TestHook_WithBuild(t *testing.T) {
 		}),
 	)
 
-	h := c.Hook("init", func(v any, provided int) HookFunc {
+	h := c.Hook("init", func(v any, provided int) func(context.Context) {
 		if provided > 0 {
 			return nil
 		}
@@ -1429,7 +1428,7 @@ func TestHook_WithBuild(t *testing.T) {
 	ctx := context.Background()
 	_, _ = Inject[Database](c)
 
-	h(func(hooks []HookFunc) {
+	h(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}
@@ -1449,11 +1448,11 @@ func TestHook_MultipleContainers(t *testing.T) {
 	c1.MustAdd(Provide(Database{DSN: "db1"}))
 	c2.MustAdd(Provide(Config{AppName: "app2"}))
 
-	h1 := c1.Hook("init", func(v any, provided int) HookFunc {
+	h1 := c1.Hook("init", func(v any, provided int) func(context.Context) {
 		return func(ctx context.Context) {}
 	})
 
-	h2 := c2.Hook("init", func(v any, provided int) HookFunc {
+	h2 := c2.Hook("init", func(v any, provided int) func(context.Context) {
 		return func(ctx context.Context) {}
 	})
 
@@ -1462,14 +1461,14 @@ func TestHook_MultipleContainers(t *testing.T) {
 	}
 }
 
-func ExampleHook() {
+func Example_hook() {
 	c := &Container{}
 	c.MustAdd(
 		Provide(Database{DSN: "mysql://localhost"}),
 		Provide(Config{AppName: "my-app"}),
 	)
 
-	startup := c.Hook("startup", func(v any, provided int) HookFunc {
+	startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
 		if provided > 0 {
 			return nil
 		}
@@ -1478,7 +1477,7 @@ func ExampleHook() {
 		}
 	})
 
-	shutdown := c.Hook("shutdown", func(v any, provided int) HookFunc {
+	shutdown := c.Hook("shutdown", func(v any, provided int) func(context.Context) {
 		if provided > 0 {
 			return nil
 		}
@@ -1492,13 +1491,13 @@ func ExampleHook() {
 	_, _ = Inject[Database](c)
 	_, _ = Inject[Config](c)
 
-	startup(func(hooks []HookFunc) {
+	startup(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}
 	})
 
-	shutdown(func(hooks []HookFunc) {
+	shutdown(func(hooks []func(context.Context)) {
 		for _, fn := range hooks {
 			fn(ctx)
 		}

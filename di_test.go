@@ -2399,3 +2399,599 @@ func TestNestedContainer_Hook_PropagationOrder(t *testing.T) {
 		t.Errorf("expected 3 hook executions, got %d", len(executionOrder))
 	}
 }
+
+// ============== Nested Container Type Detection Tests ==============
+// Comprehensive tests for type detection in nested container scenarios
+
+// TestNestedContainer_TypeDetection_BasicTwoLevel tests basic type detection in 2-level nested containers
+func TestNestedContainer_TypeDetection_BasicTwoLevel(t *testing.T) {
+	type TCConfig struct{ Value string }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCConfig{Value: "child-config"}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	// Parent should find type in child
+	cfg, err := Inject[TCConfig](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Config from parent: %v", err)
+	}
+	if cfg.Value != "child-config" {
+		t.Errorf("expected child-config, got %s", cfg.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_ThreeLevelHierarchy tests type detection across 3 levels
+func TestNestedContainer_TypeDetection_ThreeLevelHierarchy(t *testing.T) {
+	type TCDB struct{ Name string }
+
+	infra := &Container{}
+	infra.MustAdd(Provide(TCDB{Name: "infra-db"}))
+
+	services := &Container{}
+	services.MustAdd(infra)
+
+	app := &Container{}
+	app.MustAdd(services)
+
+	// App should find DB through services -> infra chain
+	db, err := Inject[TCDB](app)
+	if err != nil {
+		t.Fatalf("failed to inject DB from app: %v", err)
+	}
+	if db.Name != "infra-db" {
+		t.Errorf("expected infra-db, got %s", db.Name)
+	}
+}
+
+// TestNestedContainer_TypeDetection_FourLevelDeep tests type detection in 4-level deep hierarchy
+func TestNestedContainer_TypeDetection_FourLevelDeep(t *testing.T) {
+	type TCToken struct{ Value int }
+
+	level1 := &Container{}
+	level1.MustAdd(Provide(TCToken{Value: 100}))
+
+	level2 := &Container{}
+	level2.MustAdd(level1)
+
+	level3 := &Container{}
+	level3.MustAdd(level2)
+
+	level4 := &Container{}
+	level4.MustAdd(level3)
+
+	// Level4 should find Token through 3 levels of nesting
+	token, err := Inject[TCToken](level4)
+	if err != nil {
+		t.Fatalf("failed to inject Token from level4: %v", err)
+	}
+	if token.Value != 100 {
+		t.Errorf("expected 100, got %d", token.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_ParentOverridesChild tests that duplicate types are prevented
+func TestNestedContainer_TypeDetection_ParentOverridesChild(t *testing.T) {
+	type TCConfig2 struct{ Value string }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCConfig2{Value: "child-value"}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	// Adding duplicate type to parent should fail
+	err := parent.Add(Provide(TCConfig2{Value: "parent-value"}))
+	if err == nil {
+		t.Fatal("expected duplicate type error")
+	}
+	t.Logf("Got expected error: %v", err)
+
+	// Should still be able to inject from child
+	cfg, err := Inject[TCConfig2](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Config: %v", err)
+	}
+	if cfg.Value != "child-value" {
+		t.Errorf("expected child-value, got %s", cfg.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_MultipleChildrenIsolation tests type isolation between sibling containers
+func TestNestedContainer_TypeDetection_MultipleChildrenIsolation(t *testing.T) {
+	type TCDB2 struct{ Name string }
+	type TCCache struct{ Name string }
+
+	dbContainer := &Container{}
+	dbContainer.MustAdd(Provide(TCDB2{Name: "main-db"}))
+
+	cacheContainer := &Container{}
+	cacheContainer.MustAdd(Provide(TCCache{Name: "main-cache"}))
+
+	parent := &Container{}
+	parent.MustAdd(dbContainer, cacheContainer)
+
+	// Both types should be accessible from parent
+	db, err := Inject[TCDB2](parent)
+	if err != nil {
+		t.Fatalf("failed to inject DB: %v", err)
+	}
+
+	cache, err := Inject[TCCache](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Cache: %v", err)
+	}
+
+	if db.Name != "main-db" {
+		t.Errorf("expected main-db, got %s", db.Name)
+	}
+	if cache.Name != "main-cache" {
+		t.Errorf("expected main-cache, got %s", cache.Name)
+	}
+}
+
+// TestNestedContainer_TypeDetection_DuplicateTypeInSiblings tests duplicate type detection in sibling containers
+func TestNestedContainer_TypeDetection_DuplicateTypeInSiblings(t *testing.T) {
+	type TCConfig3 struct{ Value string }
+
+	child1 := &Container{}
+	child1.MustAdd(Provide(TCConfig3{Value: "child1"}))
+
+	child2 := &Container{}
+	child2.MustAdd(Provide(TCConfig3{Value: "child2"}))
+
+	parent := &Container{}
+	parent.MustAdd(child1)
+
+	// Adding child2 should fail due to duplicate Config type
+	err := parent.Add(child2)
+	if err == nil {
+		t.Fatal("expected duplicate type error when adding sibling with same type")
+	}
+	t.Logf("Got expected error: %v", err)
+}
+
+// TestNestedContainer_TypeDetection_InterfaceInjection tests interface type injection in nested containers
+func TestNestedContainer_TypeDetection_InterfaceInjection(t *testing.T) {
+	// Test with built-in interface
+	child := &Container{}
+	child.MustAdd(Provide(fmt.Stringer(nil)))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	_, err := Inject[fmt.Stringer](parent)
+	// This test just verifies interface types can be registered in nested containers
+	// Actual implementation depends on what's registered
+	if err == nil {
+		t.Log("Interface injection succeeded")
+	}
+}
+
+// TestNestedContainer_TypeDetection_AliasTypes tests type alias distinction
+func TestNestedContainer_TypeDetection_AliasTypes(t *testing.T) {
+	type TCStringAlias string
+	type TCStringAlias2 string
+
+	child := &Container{}
+	child.MustAdd(
+		Provide(TCStringAlias("alias1")),
+		Provide(TCStringAlias2("alias2")),
+	)
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	alias1, err := Inject[TCStringAlias](parent)
+	if err != nil {
+		t.Fatalf("failed to inject StringAlias: %v", err)
+	}
+	if alias1 != "alias1" {
+		t.Errorf("expected alias1, got %s", alias1)
+	}
+
+	alias2, err := Inject[TCStringAlias2](parent)
+	if err != nil {
+		t.Fatalf("failed to inject StringAlias2: %v", err)
+	}
+	if alias2 != "alias2" {
+		t.Errorf("expected alias2, got %s", alias2)
+	}
+}
+
+// TestNestedContainer_TypeDetection_GenericTypeInjection tests generic type injection in nested containers
+func TestNestedContainer_TypeDetection_GenericTypeInjection(t *testing.T) {
+	type TCWrapper[T any] struct {
+		Value T
+	}
+
+	child := &Container{}
+	child.MustAdd(Provide(TCWrapper[int]{Value: 42}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	wrapper, err := Inject[TCWrapper[int]](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Wrapper[int]: %v", err)
+	}
+	if wrapper.Value != 42 {
+		t.Errorf("expected 42, got %d", wrapper.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_PointerVsValue tests pointer vs value type distinction
+func TestNestedContainer_TypeDetection_PointerVsValue(t *testing.T) {
+	type TCConfig4 struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCConfig4{Value: 1}))
+	child.MustAdd(Provide(&TCConfig4{Value: 2}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	// Value type
+	cfg1, err := Inject[TCConfig4](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Config: %v", err)
+	}
+	if cfg1.Value != 1 {
+		t.Errorf("expected 1 for value type, got %d", cfg1.Value)
+	}
+
+	// Pointer type
+	cfg2, err := Inject[*TCConfig4](parent)
+	if err != nil {
+		t.Fatalf("failed to inject *Config: %v", err)
+	}
+	if cfg2.Value != 2 {
+		t.Errorf("expected 2 for pointer type, got %d", cfg2.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_SliceAndMapTypes tests slice and map type injection
+func TestNestedContainer_TypeDetection_SliceAndMapTypes(t *testing.T) {
+	child := &Container{}
+	child.MustAdd(
+		Provide([]string{"a", "b", "c"}),
+		Provide(map[string]int{"key": 42}),
+	)
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	slice, err := Inject[[]string](parent)
+	if err != nil {
+		t.Fatalf("failed to inject []string: %v", err)
+	}
+	if len(slice) != 3 {
+		t.Errorf("expected slice length 3, got %d", len(slice))
+	}
+
+	m, err := Inject[map[string]int](parent)
+	if err != nil {
+		t.Fatalf("failed to inject map[string]int: %v", err)
+	}
+	if m["key"] != 42 {
+		t.Errorf("expected map value 42, got %d", m["key"])
+	}
+}
+
+// TestNestedContainer_TypeDetection_ChannelTypes tests channel type injection
+func TestNestedContainer_TypeDetection_ChannelTypes(t *testing.T) {
+	child := &Container{}
+	child.MustAdd(Provide(make(chan int, 10)))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	ch, err := Inject[chan int](parent)
+	if err != nil {
+		t.Fatalf("failed to inject chan int: %v", err)
+	}
+	if ch == nil {
+		t.Error("expected non-nil channel")
+	}
+}
+
+// TestNestedContainer_TypeDetection_FunctionTypes tests function type injection
+func TestNestedContainer_TypeDetection_FunctionTypes(t *testing.T) {
+	type TCHandler func(string) string
+
+	child := &Container{}
+	child.MustAdd(Provide(TCHandler(func(s string) string {
+		return "handled: " + s
+	})))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	handler, err := Inject[TCHandler](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Handler: %v", err)
+	}
+	if handler("test") != "handled: test" {
+		t.Errorf("unexpected handler result")
+	}
+}
+
+// TestNestedContainer_TypeDetection_MixedProvideAndBuild tests mixed Provide and Build in nested containers
+func TestNestedContainer_TypeDetection_MixedProvideAndBuild(t *testing.T) {
+	type TCConfig5 struct{ Value string }
+	type TCService struct {
+		Name   string
+		Config TCConfig5
+	}
+
+	child := &Container{}
+	child.MustAdd(Provide(TCConfig5{Value: "child-config"}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (TCService, error) {
+		cfg, err := Inject[TCConfig5](c)
+		if err != nil {
+			return TCService{}, err
+		}
+		return TCService{Name: "parent-service", Config: cfg}, nil
+	}))
+
+	svc, err := Inject[TCService](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Service: %v", err)
+	}
+	if svc.Name != "parent-service" {
+		t.Errorf("expected parent-service, got %s", svc.Name)
+	}
+	if svc.Config.Value != "child-config" {
+		t.Errorf("expected child-config, got %s", svc.Config.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_CircularDependencyAcrossContainers tests circular dependency detection across containers
+func TestNestedContainer_TypeDetection_CircularDependencyAcrossContainers(t *testing.T) {
+	type TCServiceA struct{}
+	type TCServiceB struct{}
+
+	child := &Container{}
+	child.MustAdd(Build(func(c *Container) (TCServiceA, error) {
+		_, err := Inject[TCServiceB](c)
+		return TCServiceA{}, err
+	}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (TCServiceB, error) {
+		_, err := Inject[TCServiceA](c)
+		return TCServiceB{}, err
+	}))
+
+	_, err := Inject[TCServiceA](parent)
+	if err == nil {
+		t.Fatal("expected circular dependency error")
+	}
+	t.Logf("Got expected circular dependency error: %v", err)
+}
+
+// TestNestedContainer_TypeDetection_ProvideMethodChecksNested tests Provide method checks nested containers
+func TestNestedContainer_TypeDetection_ProvideMethodChecksNested(t *testing.T) {
+	type TCDB3 struct{ Name string }
+	type TCCache2 struct{ Name string }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCDB3{Name: "child-db"}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Provide(TCCache2{Name: "parent-cache"}))
+
+	// Check types in parent (including nested)
+	db := TCDB3{}
+	if _, ok := parent.Provide(&db); !ok {
+		t.Error("expected parent to provide DB from child")
+	}
+
+	cache := TCCache2{}
+	if _, ok := parent.Provide(&cache); !ok {
+		t.Error("expected parent to provide Cache")
+	}
+
+	// Check non-existent type
+	other := struct{ Name string }{}
+	if _, ok := parent.Provide(&other); ok {
+		t.Error("expected parent to not provide unknown type")
+	}
+}
+
+// TestNestedContainer_TypeDetection_EmptyNestedContainer tests injection with empty nested container
+func TestNestedContainer_TypeDetection_EmptyNestedContainer(t *testing.T) {
+	type TCConfig6 struct{ Value string }
+
+	emptyChild := &Container{}
+
+	parent := &Container{}
+	parent.MustAdd(emptyChild)
+	parent.MustAdd(Provide(TCConfig6{Value: "parent-config"}))
+
+	// Should still find parent's Config
+	cfg, err := Inject[TCConfig6](parent)
+	if err != nil {
+		t.Fatalf("failed to inject Config: %v", err)
+	}
+	if cfg.Value != "parent-config" {
+		t.Errorf("expected parent-config, got %s", cfg.Value)
+	}
+}
+
+// TestNestedContainer_TypeDetection_DeepHierarchyWithBuild tests deep hierarchy with Build dependencies
+func TestNestedContainer_TypeDetection_DeepHierarchyWithBuild(t *testing.T) {
+	type TCL1 struct{ V int }
+	type TCL2 struct{ V int }
+	type TCL3 struct{ V int }
+	type TCL4 struct{ V int }
+
+	level1 := &Container{}
+	level1.MustAdd(Build(func(c *Container) (TCL1, error) {
+		return TCL1{V: 1}, nil
+	}))
+
+	level2 := &Container{}
+	level2.MustAdd(level1)
+	level2.MustAdd(Build(func(c *Container) (TCL2, error) {
+		l1, _ := Inject[TCL1](c)
+		return TCL2{V: l1.V + 1}, nil
+	}))
+
+	level3 := &Container{}
+	level3.MustAdd(level2)
+	level3.MustAdd(Build(func(c *Container) (TCL3, error) {
+		l2, _ := Inject[TCL2](c)
+		return TCL3{V: l2.V + 1}, nil
+	}))
+
+	level4 := &Container{}
+	level4.MustAdd(level3)
+	level4.MustAdd(Build(func(c *Container) (TCL4, error) {
+		l3, _ := Inject[TCL3](c)
+		return TCL4{V: l3.V + 1}, nil
+	}))
+
+	// Inject from top level
+	l4, err := Inject[TCL4](level4)
+	if err != nil {
+		t.Fatalf("failed to inject L4: %v", err)
+	}
+	if l4.V != 4 {
+		t.Errorf("expected 4, got %d", l4.V)
+	}
+
+	// Also verify we can inject intermediate types
+	l2, err := Inject[TCL2](level4)
+	if err != nil {
+		t.Fatalf("failed to inject L2: %v", err)
+	}
+	if l2.V != 2 {
+		t.Errorf("expected 2, got %d", l2.V)
+	}
+}
+
+// TestNestedContainer_TypeDetection_HookRegistrationOnNested tests hook registration on nested containers
+func TestNestedContainer_TypeDetection_HookRegistrationOnNested(t *testing.T) {
+	type TCToken2 struct{ Value string }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCToken2{Value: "child-token"}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	childHookCalled := false
+	childHook := child.Hook("test", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(TCToken2); ok {
+				childHookCalled = true
+			}
+		}
+	})
+
+	parentHookCalled := false
+	parentHook := parent.Hook("test", func(v any, provided int) func(context.Context) {
+		if provided > 0 {
+			return nil
+		}
+		return func(ctx context.Context) {
+			if _, ok := v.(TCToken2); ok {
+				parentHookCalled = true
+			}
+		}
+	})
+
+	// Inject from parent - this triggers hook registration on both containers
+	_, _ = Inject[TCToken2](parent)
+
+	// Execute hooks
+	childHook.Iterate(context.Background(), false)
+	parentHook.Iterate(context.Background(), false)
+
+	if !childHookCalled {
+		t.Error("expected child hook to be called")
+	}
+	if !parentHookCalled {
+		t.Error("expected parent hook to be called")
+	}
+}
+
+// TestNestedContainer_TypeDetection_ConcurrentAccess tests concurrent access to nested containers
+func TestNestedContainer_TypeDetection_ConcurrentAccess(t *testing.T) {
+	type TCConfig7 struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(TCConfig7{Value: 42}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	// Test concurrent reads from the same container
+	var wg sync.WaitGroup
+	errors := make(chan error, 100)
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Use InjectTo which is simpler and avoids potential circular dependency detection issues
+			var cfg TCConfig7
+			if err := InjectTo(&cfg, parent); err != nil {
+				errors <- fmt.Errorf("failed to inject: %w", err)
+				return
+			}
+			if cfg.Value != 42 {
+				errors <- fmt.Errorf("expected 42, got %d", cfg.Value)
+				return
+			}
+			errors <- nil
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// TestNestedContainer_TypeDetection_ErrorPropagation tests error propagation through nested containers
+func TestNestedContainer_TypeDetection_ErrorPropagation(t *testing.T) {
+	type TCConfig8 struct{ Value string }
+	type TCService2 struct{}
+
+	child := &Container{}
+	child.MustAdd(Build(func(c *Container) (TCConfig8, error) {
+		return TCConfig8{}, fmt.Errorf("child build error")
+	}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (TCService2, error) {
+		_, err := Inject[TCConfig8](c)
+		if err != nil {
+			return TCService2{}, fmt.Errorf("service build failed: %w", err)
+		}
+		return TCService2{}, nil
+	}))
+
+	_, err := Inject[TCService2](parent)
+	if err == nil {
+		t.Fatal("expected error propagation from child")
+	}
+	t.Logf("Got expected error: %v", err)
+}

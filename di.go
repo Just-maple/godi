@@ -77,7 +77,7 @@ func (c *Container) inject(_ *Container, v any) (value any, err error) {
 }
 
 func (c *Container) Add(ps ...Provider) error {
-	if parent, exist := c.injecting.Load(c); exist {
+	if parent, exist := c.injecting.Load((*Container)(nil)); exist {
 		return fmt.Errorf("container frozen: already provided to %T %p", parent, parent)
 	}
 	for _, p := range ps {
@@ -85,7 +85,7 @@ func (c *Container) Add(ps ...Provider) error {
 		if _id, provided := c.Provide(id); provided {
 			return fmt.Errorf("provider %T already exists", _id)
 		} else if sub, ok := id.(*Container); ok {
-			sub.injecting.Store(sub, c)
+			sub.injecting.Store((*Container)(nil), c)
 		}
 		c.providers.Store(id, p)
 	}
@@ -100,12 +100,15 @@ func (c *Container) MustAdd(ps ...Provider) *Container {
 }
 
 func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
-	if _, on := c.injecting.LoadOrStore(id, ptr); on {
+	cp := &Container{providers: c.providers, hooks: c.hooks}
+	c.injecting.Range(func(key, value any) bool { cp.injecting.Store(key, value); return true })
+	if _, on := cp.injecting.LoadOrStore(id, ptr); on {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
-	} else if v, err = p.inject(c, ptr); err == nil {
-		c.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
-	c.injecting.Delete(id)
+	if v, err = p.inject(cp, ptr); err == nil {
+		cp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
+	}
+	cp.injecting.Delete(id)
 	return
 }
 

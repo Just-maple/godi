@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 )
 
@@ -48,7 +47,7 @@ func Build[R, T any](f func(R) (T, error)) Provider {
 			}
 		}
 		if l.once.Do(func() { l.value, l.err = f(v) }); l.err != nil {
-			return zero, fmt.Errorf("build %s error: %w", typName(l.value), l.err)
+			return zero, fmt.Errorf("build %s error: %w", typName(ptr), l.err)
 		}
 		*ptr = l.value
 		return l.value, nil
@@ -101,8 +100,8 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 		pv := p.(Provider)
 		if value, ok = pv.Provide(ptr); ok {
 			cp := &Container{hooks: c.hooks}
-			parent.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
 			c.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
+			parent.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
 			value, err = cp.from(pv, value, ptr)
 		}
 		return !ok
@@ -112,22 +111,33 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	return
 }
 
+type depends struct {
+	Container
+	depends int
+	id      any
+}
+
+func (deps *depends) String() string { return typName(deps.id) }
+
 func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
-	if stat, _ := c.providers.Load(id); stat == locked {
-		locks := make([]string, 0)
+	stat, _ := c.providers.Load(id)
+	if _, ok := stat.(*depends); ok {
+		deps := make([]*depends, 0)
 		c.providers.Range(func(k, v any) bool {
-			if v == locked && k != id && k != locked {
-				locks = append(locks, typName(k))
+			if vv, is := v.(*depends); is {
+				deps = append(deps, vv)
 			}
 			return true
 		})
-		sort.Strings(locks)
-		return nil, fmt.Errorf("circular dependency for %s, locked: %s", typName(ptr), strings.Join(locks, ", "))
+		sort.Slice(deps, func(i, j int) bool { return deps[i].depends > deps[j].depends })
+		return nil, fmt.Errorf("circular dependency for %s <-> %s", typName(id), deps)
 	}
-	cp := &Container{hooks: c.hooks}
+	cp, dep := &Container{hooks: c.hooks}, &depends{id: id}
 	c.providers.Range(func(k, v interface{}) bool {
 		if k == id {
-			v = locked
+			v = dep
+		} else if _, ok := v.(*depends); ok {
+			dep.depends += 1
 		}
 		cp.providers.Store(k, v)
 		return true

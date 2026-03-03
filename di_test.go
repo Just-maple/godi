@@ -1574,11 +1574,7 @@ func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
 		}
 		return A{GVal: "A-depends-on-" + bb.CVal}, nil
 	}))
-	parent.MustAdd(Build(func(c *Container) (D, error) {
-		e, err := Inject[E](c)
-		if err != nil {
-			return D{}, err
-		}
+	parent.MustAdd(Build(func(e E) (D, error) {
 		return D{EVal: "D-depends-on-" + e.FVal}, nil
 	}))
 	parent.MustAdd(Build(func(c *Container) (F, error) {
@@ -1597,6 +1593,7 @@ func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
 	if !contains(err.Error(), "circular dependency") {
 		t.Errorf("expected 'circular dependency' error, got: %v", err)
 	}
+	t.Log(err)
 }
 
 // Helper function to check if string contains substring

@@ -316,6 +316,8 @@ func TestCircularDependency(t *testing.T) {
 	}))
 	if _, err := Inject[int](c); err == nil {
 		t.Fatal("expected circular dependency error")
+	} else {
+		t.Log(err)
 	}
 }
 
@@ -1447,4 +1449,162 @@ func BenchmarkContainer_ConcurrentNestedAdd(b *testing.B) {
 			wg.Wait()
 		}
 	})
+}
+
+// TestNestedContainer_CrossContainer_ChainDependency tests dependency chain across 3-level nested containers
+// Container hierarchy:
+//
+//	parent: A, D, F
+//	child:  B, E
+//	grand:  C, G
+//
+// Chain: A => B => C => D => E => F => G (should work)
+func TestNestedContainer_CrossContainer_ChainDependency(t *testing.T) {
+	type A struct{ BVal string }
+	type B struct{ CVal string }
+	type C struct{ DVal string }
+	type D struct{ EVal string }
+	type E struct{ FVal string }
+	type F struct{ GVal string }
+	type G struct{ Value string }
+
+	// Grandchild container: provides C, G
+	grand := &Container{}
+	grand.MustAdd(Provide(G{Value: "G-base"}))
+	grand.MustAdd(Build(func(d D) (C, error) {
+		return C{DVal: "C-depends-on-" + d.EVal}, nil
+	}))
+
+	// Child container: provides B, E
+	child := &Container{}
+	child.MustAdd(grand)
+	child.MustAdd(Build(func(cc C) (B, error) {
+		return B{CVal: "B-depends-on-" + cc.DVal}, nil
+	}))
+	child.MustAdd(Build(func(f F) (E, error) {
+		return E{FVal: "E-depends-on-" + f.GVal}, nil
+	}))
+
+	// Parent container: provides A, D, F
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(bb B) (A, error) {
+		return A{BVal: "A-depends-on-" + bb.CVal}, nil
+	}))
+	parent.MustAdd(Build(func(e E) (D, error) {
+		return D{EVal: "D-depends-on-" + e.FVal}, nil
+	}))
+	parent.MustAdd(Build(func(g G) (F, error) {
+		return F{GVal: "F-depends-on-" + g.Value}, nil
+	}))
+
+	// Inject A - should traverse: A(parent) => B(child) => C(grand) => D(parent) => E(child) => F(parent) => G(grand)
+	a, err := Inject[A](parent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the full chain was resolved
+	expected := "A-depends-on-B-depends-on-C-depends-on-D-depends-on-E-depends-on-F-depends-on-G-base"
+	if a.BVal != expected {
+		t.Errorf("expected %q, got %q", expected, a.BVal)
+	}
+}
+
+// TestNestedContainer_CrossContainer_CircularDependency tests circular dependency detection across 3-level nested containers
+// Container hierarchy:
+//
+//	parent: A, D, F
+//	child:  B, E
+//	grand:  C, G
+//
+// Chain: A => B => C => D => E => F => G => A (circular - should fail)
+func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
+	type A struct{ GVal string }
+	type B struct{ CVal string }
+	type C struct{ DVal string }
+	type D struct{ EVal string }
+	type E struct{ FVal string }
+	type F struct{ GVal string }
+	type G struct{ AVal string }
+
+	// Grandchild container: provides C, G (G depends on A - creates circular!)
+	grand := &Container{}
+	grand.MustAdd(Build(func(c *Container) (G, error) {
+		// This creates the circular dependency: G => A
+		a, err := Inject[A](c)
+		if err != nil {
+			return G{}, err
+		}
+		return G{AVal: "G-depends-on-" + a.GVal}, nil
+	}))
+	grand.MustAdd(Build(func(c *Container) (C, error) {
+		d, err := Inject[D](c)
+		if err != nil {
+			return C{}, err
+		}
+		return C{DVal: "C-depends-on-" + d.EVal}, nil
+	}))
+
+	// Child container: provides B, E
+	child := &Container{}
+	child.MustAdd(grand)
+	child.MustAdd(Build(func(c *Container) (B, error) {
+		cc, err := Inject[C](c)
+		if err != nil {
+			return B{}, err
+		}
+		return B{CVal: "B-depends-on-" + cc.DVal}, nil
+	}))
+	child.MustAdd(Build(func(c *Container) (E, error) {
+		f, err := Inject[F](c)
+		if err != nil {
+			return E{}, err
+		}
+		return E{FVal: "E-depends-on-" + f.GVal}, nil
+	}))
+
+	// Parent container: provides A, D, F
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (A, error) {
+		bb, err := Inject[B](c)
+		if err != nil {
+			return A{}, err
+		}
+		return A{GVal: "A-depends-on-" + bb.CVal}, nil
+	}))
+	parent.MustAdd(Build(func(c *Container) (D, error) {
+		e, err := Inject[E](c)
+		if err != nil {
+			return D{}, err
+		}
+		return D{EVal: "D-depends-on-" + e.FVal}, nil
+	}))
+	parent.MustAdd(Build(func(c *Container) (F, error) {
+		g, err := Inject[G](c)
+		if err != nil {
+			return F{}, err
+		}
+		return F{GVal: "F-depends-on-" + g.AVal}, nil
+	}))
+
+	// Should detect circular dependency
+	_, err := Inject[A](parent)
+	if err == nil {
+		t.Fatal("expected circular dependency error")
+	}
+	if !contains(err.Error(), "circular dependency") {
+		t.Errorf("expected 'circular dependency' error, got: %v", err)
+	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

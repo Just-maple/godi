@@ -3,6 +3,8 @@ package godi
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -93,12 +95,15 @@ func (c *Container) Provide(v any) (id any, ok bool) {
 	return id, ok
 }
 
-func (c *Container) inject(_ *Container, ptr any) (value any, err error) {
+func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	ok := false
 	if c.providers.Range(func(id, p any) bool {
 		pv := p.(Provider)
 		if id, ok = pv.Provide(ptr); ok {
-			value, err = c.from(pv, id, ptr)
+			cp := &Container{hooks: c.hooks}
+			parent.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
+			c.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
+			value, err = cp.from(pv, id, ptr)
 		}
 		return !ok
 	}); !ok {
@@ -109,7 +114,15 @@ func (c *Container) inject(_ *Container, ptr any) (value any, err error) {
 
 func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
 	if stat, _ := c.providers.Load(id); stat == locked {
-		return nil, fmt.Errorf("circular dependency for %s", typName(ptr))
+		locks := make([]string, 0)
+		c.providers.Range(func(k, v any) bool {
+			if v == locked && k != id && k != locked {
+				locks = append(locks, typName(k))
+			}
+			return true
+		})
+		sort.Strings(locks)
+		return nil, fmt.Errorf("circular dependency for %s, locked: %s", typName(ptr), strings.Join(locks, ", "))
 	}
 	cp := &Container{hooks: c.hooks}
 	c.providers.Range(func(k, v interface{}) bool {

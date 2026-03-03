@@ -92,13 +92,14 @@ func (c *Container) Provide(v any) (id any, ok bool) {
 }
 
 func (c *Container) inject(_ *Container, ptr any) (value any, err error) {
-	if c.providers.Range(func(_, p any) bool {
+	ok := false
+	if c.providers.Range(func(id, p any) bool {
 		pv := p.(Provider)
-		if id, ok := pv.Provide(ptr); ok {
+		if id, ok = pv.Provide(ptr); ok {
 			value, err = c.from(pv, id, ptr)
 		}
-		return value == nil && err == nil
-	}); value == nil && err == nil {
+		return !ok
+	}); !ok {
 		err = fmt.Errorf("provider %T not found", ptr)
 	}
 	return

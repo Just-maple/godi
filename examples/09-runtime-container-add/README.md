@@ -60,7 +60,7 @@ go run main.go
 Build: Detected environment = production
 Build: Registering production database container
 Build: Connected to mysql://prod-db.company.com:3306/app
-Result: Database{DSN: mysql://prod-db.company.com:3306/app}
+Result: Connected to mysql://prod-db.company.com:3306/app
 
 --- Scenario 2: Conditional Cache Registration ---
 Build: Config.EnableCache = true
@@ -69,13 +69,15 @@ Result: Connected to cache: redis://prod-redis.company.com:6379
 
 --- Scenario 3: Interface Implementation Selection ---
 Build: Environment = test
-Build: Using mock repository for testing
+Build: Using mock repository container
 Build: Repository type = *main.MockUserRepository
 Result: Mock user 123
 
 --- Cleanup Hooks Demo ---
-Build: Adding database container at runtime
-Injected: Database{DSN: mysql://localhost:3306/app}
+Build: Adding production database container at runtime
+Build: Connected to mysql://localhost:3306/runtime
+Result: Connected to mysql://localhost:3306/runtime
+Injected Database: {DSN: }
 
 Executing cleanup hooks...
 [Cleanup] Database connection closed (call #1)
@@ -99,14 +101,19 @@ type EnvConfig struct {
 
 c.MustAdd(
     godi.Provide(EnvConfig{Env: "production"}),
-    godi.Build(func(cfg EnvConfig) (Database, error) {
-        // Choose appropriate database based on environment
+    godi.Build(func(c *godi.Container) (string, error) {
+        cfg, _ := godi.Inject[EnvConfig](c)
+
+        // Dynamically add the appropriate container at runtime
         if cfg.Env == "production" {
-            db, _ := godi.Inject[Database](prodDB)
-            return db, nil
+            c.MustAdd(prodDB)
+        } else {
+            c.MustAdd(devDB)
         }
-        db, _ := godi.Inject[Database](devDB)
-        return db, nil
+
+        // Now inject from the current container
+        db, _ := godi.Inject[Database](c)
+        return "Connected to " + db.DSN, nil
     }),
 )
 ```
@@ -123,10 +130,18 @@ cacheContainer.MustAdd(godi.Provide(Cache{Addr: "redis://localhost"}))
 
 c.MustAdd(
     godi.Provide(AppConfig{EnableCache: true}),
-    godi.Build(func(cfg AppConfig) (Service, error) {
+    godi.Build(func(c *godi.Container) (Service, error) {
+        cfg, _ := godi.Inject[AppConfig](c)
+
+        // Conditionally add cache container at runtime
+        if cfg.EnableCache {
+            c.MustAdd(cacheContainer)
+        }
+
+        // Inject dependencies from current container
         var cache *Cache
         if cfg.EnableCache {
-            cache, _ = godi.Inject[Cache](cacheContainer)
+            cache, _ = godi.Inject[Cache](c)
         }
         return NewService(cache), nil
     }),
@@ -142,23 +157,26 @@ type EnvConfig struct {
 
 // Mock repository container
 mockRepo := &godi.Container{}
-mockRepo.MustAdd(godi.Provide(func() UserRepository { return &MockUserRepository{} }()))
+mockRepo.MustAdd(godi.Provide(UserRepository(&MockUserRepository{})))
 
 // MySQL repository container
 mysqlRepo := &godi.Container{}
-mysqlRepo.MustAdd(godi.Provide(func() UserRepository { 
-    return &MySQLUserRepository{dsn: "mysql://localhost"} 
-}()))
+mysqlRepo.MustAdd(godi.Provide(UserRepository(&MySQLUserRepository{dsn: "mysql://localhost"})))
 
 c.MustAdd(
     godi.Provide(EnvConfig{Env: "test"}),
-    godi.Build(func(cfg EnvConfig) (UserRepository, error) {
+    godi.Build(func(c *godi.Container) (string, error) {
+        cfg, _ := godi.Inject[EnvConfig](c)
+
+        // Choose implementation based on environment
         if cfg.Env == "test" {
-            repo, _ := godi.Inject[func() UserRepository](mockRepo)
-            return repo(), nil
+            c.MustAdd(mockRepo)
+        } else {
+            c.MustAdd(mysqlRepo)
         }
-        repo, _ := godi.Inject[func() UserRepository](mysqlRepo)
-        return repo(), nil
+
+        repo, _ := godi.Inject[UserRepository](c)
+        return repo.GetName(), nil
     }),
 )
 ```
@@ -215,14 +233,19 @@ type Config struct {
 
 c.MustAdd(
     godi.Provide(Config{UseA: true}),
-    godi.Build(func(cfg Config) (Database, error) {
-        // Choose container at runtime based on config
+    godi.Build(func(c *godi.Container) (string, error) {
+        cfg, _ := godi.Inject[Config](c)
+
+        // Dynamically add the appropriate container at runtime
         if cfg.UseA {
-            db, _ := godi.Inject[Database](containerA)
-            return db, nil
+            c.MustAdd(containerA)
+        } else {
+            c.MustAdd(containerB)
         }
-        db, _ := godi.Inject[Database](containerB)
-        return db, nil
+
+        // Now inject from the current container
+        db, _ := godi.Inject[Database](c)
+        return "Connected to " + db.DSN, nil
     }),
 )
 ```
@@ -232,14 +255,6 @@ c.MustAdd(
 - **Build functions execute lazily** - containers are added at injection time, not registration time
 - **The Build function receives the container** - it has access to add new providers
 - **Frozen check happens at Add time** - Build execution is a special case
-
-## Best Practices
-
-1. **Pre-register containers**: Create containers for each variant before the Build function
-2. **Use interfaces**: Depend on abstractions, not concrete types
-3. **Document decisions**: Comment why certain containers are conditionally added
-4. **Combine with hooks**: Use hooks for cleanup of runtime-added resources
-5. **Keep it simple**: Don't overuse - consider if a simpler pattern would work
 
 ## Related Examples
 

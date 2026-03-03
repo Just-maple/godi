@@ -874,6 +874,21 @@ func TestMustInject_Panic(t *testing.T) {
 	MustInject[Database](c)
 }
 
+func TestBuild_Panic(t *testing.T) {
+	c := &Container{}
+	c.MustAdd(
+		Build(func(c *Container) (string, error) {
+			i, err := Inject[int](c)
+			return fmt.Sprintf("%v", i), err
+		}),
+		Build(func(c *Container) (int, error) {
+			i, _ := strconv.Atoi(MustInject[string](c))
+			return i, nil
+		}),
+	)
+	t.Log(Inject[string](c))
+}
+
 func TestMustInjectAs_Panic(t *testing.T) {
 	c := &Container{}
 	defer func() {
@@ -1394,6 +1409,17 @@ func BenchmarkInjectAs(b *testing.B) {
 	var db Database
 	for i := 0; i < b.N; i++ {
 		_ = InjectAs(c, &db)
+	}
+}
+
+func BenchmarkInjectTo(b *testing.B) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "test"}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	var db Database
+	for i := 0; i < b.N; i++ {
+		_ = InjectTo(c, &db)
 	}
 }
 

@@ -4,8 +4,6 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/Just-maple/godi)](https://goreportcard.com/report/github.com/Just-maple/godi)
 [![Test](https://github.com/Just-maple/godi/actions/workflows/test.yml/badge.svg)](https://github.com/Just-maple/godi/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/Just-maple/godi/branch/master/graph/badge.svg)](https://codecov.io/gh/Just-maple/godi)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/Just-maple/godi)](https://github.com/Just-maple/godi)
-[![License](https://img.shields.io/github/license/Just-maple/godi)](https://github.com/Just-maple/godi/blob/master/LICENSE)
 
 Lightweight Go dependency injection framework built on generics. Zero reflection, zero code generation.
 
@@ -14,12 +12,13 @@ Lightweight Go dependency injection framework built on generics. Zero reflection
 | Feature | Description |
 |---------|-------------|
 | **Type-Safe** | Full generics support, compile-time type checking |
-| **Lazy Loading** | Dependencies initialized on first use |
+| **Lazy Loading** | Dependencies initialized on first use (singleton) |
 | **Circular Detection** | Automatic runtime detection of circular dependencies |
-| **Thread-Safe** | All operations are concurrent-safe |
+| **Thread-Safe** | All operations are concurrent-safe (sync.Map) |
 | **Interface Support** | Full dependency inversion principle support |
-| **Hook System** | Lifecycle hooks for initialization and cleanup |
-| **Container Nesting** | Tree-structured container composition with duplicate detection |
+| **Hook System** | Lifecycle hooks with explicit execution |
+| **Container Nesting** | Tree-structured containers with freeze protection |
+| **Runtime Add** | Dynamic container registration in Build functions |
 
 ## 📦 Installation
 
@@ -34,13 +33,8 @@ package main
 
 import "github.com/Just-maple/godi"
 
-type Config struct {
-    DSN string
-}
-
-type Database struct {
-    Conn string
-}
+type Config struct{ DSN string }
+type Database struct{ Conn string }
 
 func main() {
     c := &godi.Container{}
@@ -65,7 +59,7 @@ func main() {
 | Method | Description | Use Case |
 |--------|-------------|----------|
 | `Provide(T)` | Register instance value | Simple values, configuration |
-| `Build(func) (T, error)` | Register factory function (lazy, singleton) | Complex initialization |
+| `Build(func) (T, error)` | Register factory function (lazy singleton) | Complex initialization |
 
 ```go
 c := &godi.Container{}
@@ -73,13 +67,13 @@ c := &godi.Container{}
 // Provide - Register instance value
 c.Add(godi.Provide(Config{Port: 8080}))
 
-// Build - Register factory function (lazy, singleton)
+// Build - Register factory function (lazy singleton)
 // Pattern 1: Single dependency (auto-injected)
 c.Add(godi.Build(func(cfg Config) (*Database, error) {
     return NewDatabase(cfg.DSN)
 }))
 
-// Pattern 2: Container access (for multiple dependencies)
+// Pattern 2: Container access (multiple dependencies)
 c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
     db, _ := godi.Inject[*Database](c)
     cache, _ := godi.Inject[*Cache](c)
@@ -114,13 +108,12 @@ var db Database
 err := godi.InjectTo(c, &db)
 
 // Multi-injection
-service := &Service{}
 err = c.Inject(&service.DB, &service.Config)
 ```
 
 ### Lifecycle Hooks
 
-Hooks allow registering callbacks that execute when dependencies are injected. Hooks are **explicitly executed** - you must call the returned executor function.
+Hooks allow registering callbacks that execute when dependencies are injected. **Hooks are explicitly executed** - you must call the returned executor function.
 
 ```go
 package main
@@ -133,135 +126,7 @@ import (
 
 c := &godi.Container{}
 
-// Register dependencies
-c.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Provide(Cache{Addr: "redis://localhost"}),
-)
-
-// Hook with execution counter - runs on every injection
-startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil // Skip if already injected before
-    }
-    return func(ctx context.Context) {
-        fmt.Printf("Starting: %T\n", v)
-    }
-})
-
-// HookOnce - automatically runs only on first injection
-shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        fmt.Printf("Stopping: %T\n", v)
-    }
-})
-
-// Inject dependencies (this registers the hooks)
-_, _ = godi.Inject[Database](c)
-_, _ = godi.Inject[Cache](c)
-
-// Execute hooks explicitly
-ctx := context.Background()
-
-// Option 1: Manual iteration
-startup(func(hooks []func(context.Context)) {
-    for _, fn := range hooks {
-        fn(ctx)
-    }
-})
-
-// Option 2: Using Iterate helper (recommended)
-startup.Iterate(ctx, false) // false = forward order
-shutdown.Iterate(ctx, false)
-
-// Output:
-// Starting: Database
-// Starting: Cache
-// Stopping: Database
-// Stopping: Cache
-```
-
-**Hook Mechanisms:**
-
-| Aspect | Behavior |
-|--------|----------|
-| **Trigger Point** | Hooks register when dependency is injected |
-| **Execution** | Explicit - must call the returned executor function |
-| **`provided` Counter** | Tracks how many times a type has been injected (0 = first time) |
-| **HookOnce** | Automatically skips when `provided > 0` |
-| **Hook** | Manual control via `provided` parameter |
-| **Execution Order** | Hooks execute in registration order |
-| **Nested Containers** | Hooks trigger on each container in the injection path |
-
-**Hook Behavior in Nested Containers:**
-
-Hooks are triggered on **each container in the injection path**. Each container maintains its own `provided` counter per type:
-
-```go
-// Infrastructure layer
-infra := &godi.Container{}
-infra.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
-
-infraHook := infra.Hook("startup", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) {
-        fmt.Printf("[Infra] Starting: %T\n", v)
-    }
-})
-
-// Application layer
-app := &godi.Container{}
-app.MustAdd(infra)
-
-appHook := app.Hook("startup", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) {
-        fmt.Printf("[App] Starting: %T\n", v)
-    }
-})
-
-// Inject from parent - triggers hooks on BOTH containers
-_, _ = godi.Inject[Database](app)
-
-// Execute hooks for each container separately
-// Option 1: Manual iteration
-infraHook(func(hooks []func(context.Context)) {
-    for _, fn := range hooks {
-        fn(context.Background())
-    }
-})
-
-appHook(func(hooks []func(context.Context)) {
-    for _, fn := range hooks {
-        fn(context.Background())
-    }
-})
-
-// Option 2: Using Iterate helper (recommended)
-ctx := context.Background()
-infraHook.Iterate(ctx, false)
-appHook.Iterate(ctx, false)
-
-// Output:
-// [Infra] Starting: Database
-// [App] Starting: Database
-```
-
-**Key Points:**
-- Hooks trigger on **each container** in the injection chain
-- Each container maintains its **own `provided` counter** per type
-- Use `provided > 0` check to run hooks only on first injection
-- Execute hooks for each container separately
-- Hooks are registered during injection, executed when you call the executor
-
-**Common Patterns:**
-
-```go
-// 1. Resource Cleanup with HookOnce
+// Register hook BEFORE injecting dependencies
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         if closer, ok := v.(interface{ Close() error }); ok {
@@ -270,83 +135,58 @@ shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     }
 })
 
-// 2. Conditional Initialization
-// Option A: Using HookOnce (recommended for simple cases)
-startup := c.HookOnce("startup", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        // Initialize resource - only runs once automatically
-    }
+// Add and inject dependencies (hooks are registered)
+c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+_, _ = godi.Inject[Database](c)
+
+// Execute hooks explicitly
+shutdown.Iterate(context.Background(), false)
+```
+
+**Hook Mechanisms:**
+
+| Aspect | Behavior |
+|--------|----------|
+| **Trigger Point** | Hooks register when dependency is injected |
+| **Execution** | Explicit - must call executor function |
+| **`provided` Counter** | Tracks injection count (0 = first time) |
+| **HookOnce** | Automatically skips when `provided > 0` |
+| **Hook** | Manual control via `provided` parameter |
+| **Nested Containers** | Hooks trigger on each container in path |
+
+**Hook in Nested Containers:**
+
+```go
+// Infrastructure layer
+infra := &godi.Container{}
+infra.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+infraHook := infra.HookOnce("cleanup", func(v any) func(context.Context) {
+    return func(ctx context.Context) { fmt.Printf("[Infra] %T\n", v) }
 })
 
-// Option B: Using Hook with provided check (for conditional logic)
-startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil // Only initialize on first injection
-    }
-    return func(ctx context.Context) {
-        // Initialize resource
-    }
+// Application layer
+app := &godi.Container{}
+app.MustAdd(infra)
+appHook := app.HookOnce("cleanup", func(v any) func(context.Context) {
+    return func(ctx context.Context) { fmt.Printf("[App] %T\n", v) }
 })
 
-// 3. Interface-based Cleanup
-c.HookOnce("cleanup", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        switch resource := v.(type) {
-        case Database:
-            resource.Close()
-        case Cache:
-            resource.Disconnect()
-        }
-    }
-})
+// Inject from parent - triggers hooks on BOTH containers
+_, _ = godi.Inject[Database](app)
 
-// 4. Graceful Shutdown with Reverse Order
-shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        // Cleanup logic
-    }
-})
-
-shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-defer cancel()
-
-// Execute in reverse order for proper cleanup
-shutdown.Iterate(shutdownCtx, true) // true = reverse order
-
-// 5. Multi-Phase Lifecycle
-// Use HookOnce for each phase (recommended)
-init := c.HookOnce("init", func(v any) func(context.Context) {
-    return func(ctx context.Context) { /* init */ }
-})
-
-start := c.HookOnce("start", func(v any) func(context.Context) {
-    return func(ctx context.Context) { /* start */ }
-})
-
-// Or use Hook with provided check for conditional logic per phase
-init := c.Hook("init", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) { /* init */ }
-})
-
-start := c.Hook("start", func(v any, provided int) func(context.Context) {
-    if provided > 0 {
-        return nil
-    }
-    return func(ctx context.Context) { /* start */ }
-})
-
-// Execute phases in order
+// Execute hooks for each container separately
 ctx := context.Background()
-init.Iterate(ctx, false)
-start.Iterate(ctx, false)
+infraHook.Iterate(ctx, false)
+appHook.Iterate(ctx, false)
+
+// Output:
+// [Infra] Database
+// [App] Database
 ```
 
 ### Container Nesting
 
-Container nesting allows building modular, tree-structured applications with automatic duplicate detection and container freezing.
+Containers can be nested to create modular applications. Child containers become **frozen** after being added to parent.
 
 ```go
 // Child container
@@ -355,12 +195,12 @@ child.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 
 // Parent container with nested child
 parent := &godi.Container{}
-parent.MustAdd(child)
+parent.MustAdd(child)  // child is now frozen
 
 // Inject from parent (finds Database in child)
 db, _ := godi.Inject[Database](parent)
 
-// Adding duplicate types is prevented
+// Duplicate prevention
 err := parent.Add(godi.Provide(Database{DSN: "other"}))
 // err: provider *godi.Database already exists
 ```
@@ -370,14 +210,12 @@ err := parent.Add(godi.Provide(Database{DSN: "other"}))
 | Mechanism | Behavior |
 |-----------|----------|
 | **Tree Search** | Inject traverses child containers depth-first |
-| **Duplicate Detection** | Add checks all nested containers for existing types |
-| **Container Freezing** | Child containers are frozen after being added as provider |
-| **Hook Propagation** | Hooks trigger on each container in the injection path |
-| **Per-Container Counters** | Each container tracks its own `provided` count per type |
+| **Duplicate Detection** | Add checks all nested containers |
+| **Container Freezing** | Child containers frozen after parent addition |
+| **Hook Propagation** | Hooks trigger on each container in path |
+| **Runtime Add** | Build functions CAN add containers dynamically |
 
 **Container Freezing:**
-
-When a container is added to a parent, it becomes **frozen** and cannot accept new providers:
 
 ```go
 child := &godi.Container{}
@@ -386,44 +224,29 @@ child.MustAdd(godi.Provide(Config{Value: "child"}))
 parent := &godi.Container{}
 parent.MustAdd(child)  // child is now frozen
 
-// This will fail: "container is frozen: already provided to container"
+// This fails: "container is frozen"
 err := child.Add(godi.Provide(struct{ Name string }{Name: "new"}))
 ```
 
-**Provide Method:**
-
-Check if a type is provided by the container (including nested containers):
+**Runtime Add in Build (Allowed):**
 
 ```go
 c := &godi.Container{}
-c.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+nested := &godi.Container{}
+nested.MustAdd(godi.Provide("value"))
 
-db := Database{}
-_, ok := c.Provide(&db)
-fmt.Println(ok)  // true
-
-other := struct{ Other string }{}
-_, ok = c.Provide(&other)
-fmt.Println(ok)  // false
+c.MustAdd(godi.Build(func(c *godi.Container) (string, error) {
+    // This is OK - adding during Build execution
+    c.MustAdd(nested)
+    return godi.Inject[string](c)
+}))
 ```
-
-**Hook Behavior in Nested Containers:**
-
-See [Lifecycle Hooks](#lifecycle-hooks) for detailed hook behavior in nested containers. In summary:
-- Hooks trigger on **each container** in the injection path
-- Each container maintains **independent `provided` counters** per type
-- Execute hooks for each container separately using their executor functions
 
 ## 📚 Usage Patterns
 
 ### 1. Constructor-Based Injection
 
 ```go
-type Service struct {
-    DB   Database
-    Config Config
-}
-
 c.MustAdd(
     godi.Provide(Database{DSN: "mysql://localhost"}),
     godi.Provide(Config{AppName: "my-app"}),
@@ -435,14 +258,7 @@ c.MustAdd(
 )
 ```
 
-### 2. Field Injection
-
-```go
-service := &Service{}
-err := c.Inject(&service.DB, &service.Config, &service.Cache)
-```
-
-### 3. Interface-Based (Dependency Inversion)
+### 2. Interface-Based (Dependency Inversion)
 
 ```go
 type Database interface {
@@ -457,32 +273,35 @@ c.Add(godi.Build(func(c *godi.Container) (Database, error) {
 db, err := godi.Inject[Database](c)
 ```
 
-### 4. Dependency Chains
+### 3. Environment-Based Selection (Runtime Add)
 
 ```go
+prodDB := &godi.Container{}
+prodDB.MustAdd(godi.Provide(Database{DSN: "mysql://prod-db"}))
+
+devDB := &godi.Container{}
+devDB.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+
 c.MustAdd(
-    godi.Provide(Config{DSN: "mysql://localhost"}),
-    godi.Build(func(c *godi.Container) (*Database, error) {
+    godi.Provide(Config{Env: "production"}),
+    godi.Build(func(c *godi.Container) (Database, error) {
         cfg, _ := godi.Inject[Config](c)
-        return NewDatabase(cfg.DSN)
-    }),
-    godi.Build(func(c *godi.Container) (*Repository, error) {
-        db, _ := godi.Inject[*Database](c)
-        return NewRepository(db)
-    }),
-    godi.Build(func(c *godi.Container) (*Service, error) {
-        repo, _ := godi.Inject[*Repository](c)
-        return NewService(repo)
+        if cfg.Env == "production" {
+            c.MustAdd(prodDB)
+        } else {
+            c.MustAdd(devDB)
+        }
+        return godi.Inject[Database](c)
     }),
 )
 ```
 
-### 5. Graceful Shutdown with Hooks
+### 4. Graceful Shutdown with Hooks
 
 ```go
 c := &godi.Container{}
 
-// Register shutdown hook before injecting dependencies
+// Register hook BEFORE injection
 shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     return func(ctx context.Context) {
         if closer, ok := v.(interface{ Close() error }); ok {
@@ -495,24 +314,18 @@ c.MustAdd(
     godi.Build(func(c *godi.Container) (*Database, error) {
         return NewDatabase("dsn")
     }),
-    godi.Build(func(c *godi.Container) (*Cache, error) {
-        return NewCache("redis://localhost")
-    }),
 )
 
-// Inject dependencies (hooks are registered)
+// Inject (hook is registered)
 _, _ = godi.Inject[*Database](c)
-_, _ = godi.Inject[*Cache](c)
 
-// Graceful shutdown with timeout
-shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// Execute with timeout
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 defer cancel()
-
-// Execute hooks in reverse order for proper cleanup
-shutdown.Iterate(shutdownCtx, true) // true = reverse order
+shutdown.Iterate(ctx, true)  // true = reverse order
 ```
 
-### 6. Testing with Mocks
+### 5. Testing with Mocks
 
 ```go
 // Production
@@ -526,62 +339,6 @@ test := &godi.Container{}
 test.Add(godi.Provide(&MockDatabase{Data: testData}))
 
 // Same service code, different implementations
-svc := NewUserService(db)
-```
-
-### 7. Container Nesting
-
-```go
-// Infrastructure layer
-infra := &godi.Container{}
-infra.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Provide(Cache{Addr: "redis://localhost"}),
-)
-
-// Register hooks on infra container
-infraShutdown := infra.HookOnce("shutdown", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        fmt.Printf("Infra cleanup: %T\n", v)
-    }
-})
-
-// Application layer
-app := &godi.Container{}
-app.MustAdd(infra, godi.Provide(Config{AppName: "my-app"}))
-
-// Register hooks on app container
-appShutdown := app.HookOnce("shutdown", func(v any) func(context.Context) {
-    return func(ctx context.Context) {
-        fmt.Printf("App cleanup: %T\n", v)
-    }
-})
-
-// Inject all from parent
-db, _ := godi.Inject[Database](app)
-cache, _ := godi.Inject[Cache](app)
-cfg, _ := godi.Inject[Config](app)
-
-// Execute hooks for each container
-ctx := context.Background()
-infraShutdown.Iterate(ctx, false)
-appShutdown.Iterate(ctx, false)
-```
-
-### 8. Build with Dependency Chain
-
-```go
-type Name string
-type Length int
-
-c.MustAdd(
-    godi.Provide(Name("hello")),
-    godi.Build(func(s Name) (Length, error) {
-        return Length(len(s)), nil
-    }),
-)
-
-len := godi.MustInject[Length](c) // 5
 ```
 
 ## 🔧 Supported Types
@@ -603,14 +360,9 @@ len := godi.MustInject[Length](c) // 5
 | **Type System** | Generics | Reflection | Code Gen | Generics |
 | **Runtime Errors** | No | Possible | No | Possible |
 | **Build Step** | No | No | Required | No |
-| **API Style** | Functional | Functional | Code Gen | Functional |
-| **Learning Curve** | Low | Medium | High | Low |
-| **Bundle Size** | Minimal | Medium | Large | Small |
-| **Lifecycle Hooks** | ✅ | ✅ | ❌ | ✅ |
-| **Circular Detection** | ✅ | ✅ | ✅ | ✅ |
-| **Lazy Loading** | ✅ | ✅ | ❌ | ✅ |
 | **Container Nesting** | ✅ | ❌ | ❌ | ❌ |
-| **Project Status** | Active | Active | ⚠️ Archived | Active |
+| **Runtime Add** | ✅ | ❌ | ❌ | ❌ |
+| **Learning Curve** | Low | Medium | High | Low |
 
 ### When to Choose godi
 
@@ -619,6 +371,7 @@ len := godi.MustInject[Length](c) // 5
 - You need **lifecycle management** for resources
 - You value **simple, intuitive API**
 - You need **container nesting** for modular architecture
+- You need **runtime container registration** for dynamic scenarios
 
 ## 📁 Examples
 
@@ -638,7 +391,7 @@ Complete examples available in [`examples/`](examples/):
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome!
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)

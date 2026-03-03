@@ -1,271 +1,201 @@
 // Package godi is a lightweight Go dependency injection framework built on generics.
 // Zero reflection, zero code generation.
 //
-// # Core Architecture
+// # Core Philosophy
 //
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                         Container                                │
-//	│  ┌─────────────────────────────────────────────────────────┐   │
-//	│  │                    providers (sync.Map)                  │   │
-//	│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │   │
-//	│  │  │    Type A    │  │    Type B    │  │    Type C    │  │   │
-//	│  │  │   Provider   │  │   Provider   │  │   Provider   │  │   │
-//	│  │  └──────────────┘  └──────────────┘  └──────────────┘  │   │
-//	│  └─────────────────────────────────────────────────────────┘   │
-//	│  ┌─────────────────────────────────────────────────────────┐   │
-//	│  │                     hooks (sync.Map)                     │   │
-//	│  └─────────────────────────────────────────────────────────┘   │
-//	└─────────────────────────────────────────────────────────────────┘
-//	                              ▲
-//	                              │ Add()
-//	                              │
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                        Provider                                  │
-//	│  ┌─────────────────┐           ┌─────────────────┐             │
-//	│  │  Provide(value) │           │  Build(func)    │             │
-//	│  │  - Register     │           │  - Register     │             │
-//	│  │    instance     │           │    factory      │             │
-//	│  │  - Immediate    │           │  - Lazy loading │             │
-//	│  │    storage      │           │    singleton    │             │
-//	│  └─────────────────┘           └─────────────────┘             │
-//	└─────────────────────────────────────────────────────────────────┘
+// Godi follows three design principles:
+//   - Type Safety: Full generics support with compile-time type checking
+//   - Lazy Loading: Dependencies initialized on first use (singleton pattern)
+//   - Explicit Control: No magic - you control when and how injection happens
 //
-// # Registration Flow
+// # Quick Start
 //
-//	┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-//	│  Create       │ ──▶ │  Add          │ ──▶ │   Freeze     │
-//	│  Container    │     │  Provider     │     │ (add to      │
-//	│  &Container{} │     │  c.Add(...)   │     │  parent)     │
-//	└──────────────┘     └──────────────┘     └──────────────┘
+//	c := &godi.Container{}
+//	c.MustAdd(
+//	    godi.Provide(Config{DSN: "mysql://localhost"}),
+//	    godi.Build(func(cfg Config) (*Database, error) {
+//	        return &Database{Conn: cfg.DSN}, nil
+//	    }),
+//	)
+//	db := godi.MustInject[*Database](c)
 //
-//	Example:
-//	  c := &godi.Container{}
-//	  c.Add(
-//	      godi.Provide(Config{DSN: "mysql://localhost"}),
-//	      godi.Build(func(cfg Config) (*Database, error) {
-//	          return &Database{Conn: cfg.DSN}, nil
-//	      }),
-//	      godi.Build(func(db *Database) (*Service, error) {
-//	          return &Service{DB: db}, nil
-//	      }),
-//	  )
+// # Container Architecture
 //
-// # Build Function Patterns
+// Container is the core structure that manages providers and handles injection.
+// It uses sync.Map for thread-safe concurrent access.
 //
-// Build supports three dependency injection patterns:
+//	┌─────────────────────────────────────────────────────────┐
+//	│                     Container                            │
+//	│  ┌─────────────────────────────────────────────────┐   │
+//	│  │            providers (sync.Map)                  │   │
+//	│  │  Maps type → Provider (Provide/Build)            │   │
+//	│  └─────────────────────────────────────────────────┘   │
+//	│  ┌─────────────────────────────────────────────────┐   │
+//	│  │              hooks (sync.Map)                    │   │
+//	│  │  Maps hook name → hook functions                 │   │
+//	│  └─────────────────────────────────────────────────┘   │
+//	└─────────────────────────────────────────────────────────┘
 //
-//  1. Single Dependency (auto-injected):
-//     godi.Build(func(cfg Config) (*Database, error) {
-//     return &Database{DSN: cfg.DSN}, nil
-//     })
+// # Registration: Provide vs Build
 //
-//  2. Container Access (manual multi-inject):
-//     godi.Build(func(c *godi.Container) (*Service, error) {
-//     db, _ := godi.Inject[*Database](c)
-//     cache, _ := godi.Inject[*Cache](c)
-//     return &Service{DB: db, Cache: cache}, nil
-//     })
+// Provide registers an existing value (immediate storage):
 //
-//  3. No Dependency (struct{}):
-//     godi.Build(func(_ struct{}) (*Logger, error) {
-//     return &Logger{Name: "app"}, nil
-//     })
+//	c.Add(godi.Provide(Config{Port: 8080}))
 //
-// # Injection Flow
+// Build registers a factory function (lazy singleton):
 //
-//	┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-//	│  Call Inject  │ ──▶ │  Find         │ ──▶ │  Execute     │
-//	│  Inject[T](c) │     │  Provider     │     │  Factory     │
-//	│               │     │  providers.   │     │  Build(func) │
-//	│               │     │  Load         │     │              │
-//	└──────────────┘     └──────────────┘     └──────────────┘
-//	                             │                    │
-//	                             ▼                    ▼
-//	┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-//	│  Trigger Hook │ ◀── │  Return       │ ◀── │  Cache       │
-//	│  hooks.Range  │     │  Instance     │     │  sync.Once   │
-//	│               │     │  (singleton)  │     │              │
-//	└──────────────┘     └──────────────┘     └──────────────┘
+//	c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
+//	    cfg, _ := godi.Inject[Config](c)
+//	    return NewDatabase(cfg.DSN), nil
+//	}))
 //
-//	Example:
-//	  // Method 1: Generic injection
-//	  db, err := godi.Inject[*Database](c)
+// Build supports three dependency patterns:
 //
-//	  // Method 2: Inject to existing variable
-//	  var db Database
-//	  err := godi.InjectTo(c, &db)
+// Pattern 1: Single dependency (auto-injected)
 //
-//	  // Method 3: Must mode (panics on failure)
-//	  db := godi.MustInject[*Database](c)
+//	godi.Build(func(cfg Config) (*Database, error) {
+//	    return NewDatabase(cfg.DSN), nil
+//	})
 //
-// # Nested Container Architecture
+// Pattern 2: Container access (manual multi-inject)
 //
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                      Parent Container                           │
-//	│  ┌─────────────────────────────────────────────────────────┐   │
-//	│  │  providers: [Config] [Child Container]                   │   │
-//	│  │  hooks: ["shutdown" -> cleanupFn]                        │   │
-//	│  └─────────────────────────────────────────────────────────┘   │
-//	│                              │                                  │
-//	│                              ▼ Add(child)                       │
-//	│  ┌─────────────────────────────────────────────────────────┐   │
-//	│  │                    Child Container                       │   │
-//	│  │  ┌─────────────────────────────────────────────────┐    │   │
-//	│  │  │  providers: [Database] [Cache] [Service]         │    │   │
-//	│  │  │  hooks: ["startup" -> initFn]                    │    │   │
-//	│  │  └─────────────────────────────────────────────────┘    │   │
-//	│  │                              │                           │   │
-//	│  │                              ▼ Add(grandchild)           │   │
-//	│  │  ┌─────────────────────────────────────────────────┐    │   │
-//	│  │  │                 Grandchild Container              │    │   │
-//	│  │  │  providers: [Logger] [Metrics]                   │    │   │
-//	│  │  └─────────────────────────────────────────────────┘    │   │
-//	│  └─────────────────────────────────────────────────────────┘   │
-//	└─────────────────────────────────────────────────────────────────┘
+//	godi.Build(func(c *godi.Container) (*Service, error) {
+//	    db, _ := godi.Inject[*Database](c)
+//	    cache, _ := godi.Inject[*Cache](c)
+//	    return NewService(db, cache), nil
+//	})
 //
-//	Injection search path (depth-first):
-//	  Parent.Inject[*Database]()
-//	    │
-//	    ├─▶ Parent.providers.Load(*Database) ──▶ Not found
-//	    │
-//	    ├─▶ Child Container
-//	    │     │
-//	    │     ├─▶ Child.providers.Load(*Database) ──▶ Found! Return
-//	    │
-//	    └─▶ Grandchild Container (no need to search)
+// Pattern 3: No dependency (using struct{})
 //
-//	Example:
-//	  // Infrastructure layer
-//	  infra := &godi.Container{}
-//	  infra.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+//	godi.Build(func(_ struct{}) (*Logger, error) {
+//	    return NewLogger(), nil
+//	})
 //
-//	  // Application layer
-//	  app := &godi.Container{}
-//	  app.MustAdd(infra, godi.Provide(Config{AppName: "my-app"}))
+// # Injection Methods
 //
-//	  // Inject from parent (searches in child)
-//	  db, _ := godi.Inject[Database](app)
+// Generic injection (returns value + error):
+//
+//	db, err := godi.Inject[*Database](c)
+//
+// Must mode (panics on error):
+//
+//	db := godi.MustInject[*Database](c)
+//
+// Inject to existing variable:
+//
+//	var db Database
+//	err := godi.InjectTo(c, &db)
+//
+// Multi-injection:
+//
+//	err := c.Inject(&db, &cfg, &cache)
+//
+// # Container Nesting
+//
+// Containers can be nested to create modular, tree-structured applications.
+// Child containers become frozen (read-only) after being added to parent.
+//
+//	┌─────────────────────────────────────────────────────────┐
+//	│                  Parent Container                        │
+//	│  providers: [Config] [Child Container]                  │
+//	│  ┌─────────────────────────────────────────────────┐   │
+//	│  │              Child Container                     │   │
+//	│  │  providers: [Database] [Cache] [Service]         │   │
+//	│  │  ┌─────────────────────────────────────────┐    │   │
+//	│  │  │          Grandchild Container            │    │   │
+//	│  │  │  providers: [Logger] [Metrics]           │    │   │
+//	│  │  └─────────────────────────────────────────┘    │   │
+//	│  └─────────────────────────────────────────────────┘   │
+//	└─────────────────────────────────────────────────────────┘
+//
+// Injection search path (depth-first):
+//
+//	infra := &godi.Container{}
+//	infra.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+//
+//	app := &godi.Container{}
+//	app.MustAdd(infra, godi.Provide(Config{AppName: "my-app"}))
+//
+//	// Inject from parent (searches in child)
+//	db, _ := godi.Inject[Database](app)
+//
+// # Container Freezing
+//
+// When a container is added to a parent, it becomes frozen and cannot accept new providers.
+// However, Build functions CAN add containers at runtime (special case).
+//
+// Frozen (cannot add):
+//
+//	child := &godi.Container{}
+//	parent.MustAdd(child)  // child is frozen
+//	child.Add(...)         // ERROR: container frozen
+//
+// Runtime Add in Build (allowed):
+//
+//	c.MustAdd(godi.Build(func(c *godi.Container) (T, error) {
+//	    c.MustAdd(nestedContainer)  // OK: runtime add
+//	    return godi.Inject[T](c)
+//	}))
 //
 // # Hook Lifecycle
 //
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                    Hook Execution Flow                          │
-//	└─────────────────────────────────────────────────────────────────┘
+// Hooks allow registering callbacks that execute when dependencies are injected.
+// Hooks are explicitly executed - you must call the returned executor function.
 //
-//	Registration Phase:              Execution Phase:
-//	┌──────────────┐                  ┌──────────────┐
-//	│  c.HookOnce  │                  │  Inject      │
-//	│  ("startup", │                  │  Inject[T](c)│
-//	│   hookFn)    │                  └──────────────┘
-//	└──────────────┘                         │
-//	     │                                   ▼
-//	     ▼                          ┌──────────────┐
-//	┌──────────────┐                │  Trigger Hook│
-//	│  Returns     │                │  hooks.Range │
-//	│  executor    │                └──────────────┘
-//	│  startup     │                       │
-//	└──────────────┘                       ▼
-//	                               ┌──────────────┐
-//	┌──────────────┐               │  Call        │
-//	│  Execute Hook│◀──────────────│  executor.   │
-//	│  startup(fn) │               │  Iterate()   │
-//	└──────────────┘               └──────────────┘
+// Registration (before injection):
 //
-//	Example:
-//	  c := &godi.Container{}
+//	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+//	    return func(ctx context.Context) {
+//	        if closer, ok := v.(interface{ Close() error }); ok {
+//	            closer.Close()
+//	        }
+//	    }
+//	})
 //
-//	  // Register shutdown hook (before injecting dependencies)
-//	  shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
-//	      return func(ctx context.Context) {
-//	          if closer, ok := v.(interface{ Close() error }); ok {
-//	              closer.Close()
-//	          }
-//	      }
-//	  })
+// Injection (hooks are registered):
 //
-//	  // Add dependencies
-//	  c.MustAdd(
-//	      godi.Provide(Config{DSN: "dsn"}),
-//	      godi.Build(func(cfg Config) (*Database, error) {
-//	          return NewDatabase(cfg.DSN), nil
-//	      }),
-//	  )
+//	_, _ = godi.Inject[Database](c)
 //
-//	  // Inject dependencies (hook is registered)
-//	  _, _ = godi.Inject[*Database](c)
+// Execution (explicit call):
 //
-//	  // Execute hook
-//	  shutdown.Iterate(ctx, false) // false = forward order
+//	shutdown.Iterate(ctx, false)  // false = forward order
 //
-// # Concurrency Safety
-//
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                 Concurrency Safety Design                       │
-//	└─────────────────────────────────────────────────────────────────┘
-//
-//	providers: sync.Map          // Lock-free read/write
-//	hooks:     sync.Map          // Lock-free read/write
-//	Build:     sync.Once         // Lazy loading singleton
-//
-//	Concurrent injection scenario:
-//	  Goroutine 1 ──┐
-//	  Goroutine 2 ──┼──▶ Inject[*Database](c) ──▶ sync.Once.Do() ──▶ Execute once
-//	  Goroutine 3 ──┘                              │
-//	                                               ▼
-//	                                        ┌──────────────┐
-//	                                        │ Return cached│
-//	                                        │ instance     │
-//	                                        │ (thread-safe)│
-//	                                        └──────────────┘
-//
-//	Example:
-//	  var wg sync.WaitGroup
-//	  for i := 0; i < 100; i++ {
-//	      wg.Add(1)
-//	      go func() {
-//	          defer wg.Done()
-//	          db, _ := godi.Inject[*Database](c)
-//	          _ = db
-//	      }()
-//	  }
-//	  wg.Wait()
+// Hook Behavior in Nested Containers:
+// - Hooks trigger on each container in the injection path
+// - Each container maintains independent `provided` counters per type
+// - Execute hooks for each container separately
 //
 // # Circular Dependency Detection
 //
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│              Circular Dependency Detection                      │
-//	└─────────────────────────────────────────────────────────────────┘
+// Godi automatically detects circular dependencies at runtime.
 //
-//	Normal dependency chain:     Circular dependency chain:
-//	  A ──▶ B ──▶ C               A ──▶ B ──▶ C
-//	  │                           ▲         │
-//	  └───────────────────────────┴─────────┘
+// Normal chain: A → B → C (OK)
+// Circular: A → B → C → A (ERROR)
 //
-//	Detection mechanism:
-//	  1. Create temporary container nc during injection, mark injecting type
-//	  2. If marked type is encountered in injection path, return circular dependency error
-//	  3. Clean up markers after injection completes
+// Detection mechanism:
+//  1. Create temporary container context during injection
+//  2. Mark types being injected with depth tracking
+//  3. If marked type encountered, return circular dependency error
+//  4. Clean up markers after injection completes
 //
-//	Example:
-//	  type ServiceA interface{}
-//	  type ServiceB interface{}
+// # Concurrency Safety
 //
-//	  parent := &godi.Container{}
-//	  child := &godi.Container{}
+// All operations are thread-safe:
+//   - providers: sync.Map (lock-free read/write)
+//   - hooks: sync.Map (lock-free read/write)
+//   - Build: sync.Once (lazy singleton)
 //
-//	  child.MustAdd(godi.Build(func(db Database) (ServiceA, error) {
-//	      // A depends on B
-//	      return db, nil
-//	  }))
+// Concurrent injection scenario:
 //
-//	  parent.MustAdd(child, godi.Build(func(svc ServiceA) (ServiceB, error) {
-//	      // B depends on A (circular!)
-//	      return svc, nil
-//	  }))
-//
-//	  // Trigger circular dependency detection
-//	  _, err := godi.Inject[ServiceA](parent)
-//	  // err: circular dependency for ServiceA
+//	var wg sync.WaitGroup
+//	for i := 0; i < 100; i++ {
+//	    wg.Add(1)
+//	    go func() {
+//	        defer wg.Done()
+//	        db, _ := godi.Inject[*Database](c)  // Safe
+//	    }()
+//	}
+//	wg.Wait()
 //
 // # Complete Example
 //
@@ -277,22 +207,10 @@
 //	    "github.com/Just-maple/godi"
 //	)
 //
-//	type Config struct {
-//	    DSN string
-//	}
-//
-//	type Database struct {
-//	    Conn string
-//	}
-//
-//	type Cache struct {
-//	    Addr string
-//	}
-//
-//	type Service struct {
-//	    DB    *Database
-//	    Cache *Cache
-//	}
+//	type Config struct{ DSN string }
+//	type Database struct{ Conn string }
+//	type Cache struct{ Addr string }
+//	type Service struct{ DB *Database; Cache *Cache }
 //
 //	func main() {
 //	    c := &godi.Container{}
@@ -304,34 +222,27 @@
 //	        }
 //	    })
 //
-//	    // Add dependencies using different Build patterns
+//	    // Add dependencies
 //	    c.MustAdd(
-//	        // Pattern 1: Provide value
 //	        godi.Provide(Config{DSN: "mysql://localhost"}),
-//
-//	        // Pattern 2: Single dependency (auto-injected)
 //	        godi.Build(func(cfg Config) (*Database, error) {
 //	            return &Database{Conn: cfg.DSN}, nil
 //	        }),
-//
-//	        // Pattern 3: Container access for multiple dependencies
+//	        godi.Build(func(_ struct{}) (*Cache, error) {
+//	            return &Cache{Addr: "redis://localhost"}, nil
+//	        }),
 //	        godi.Build(func(c *godi.Container) (*Service, error) {
 //	            db, _ := godi.Inject[*Database](c)
 //	            cache, _ := godi.Inject[*Cache](c)
 //	            return &Service{DB: db, Cache: cache}, nil
 //	        }),
-//
-//	        // Pattern 4: No dependency (struct{})
-//	        godi.Build(func(_ struct{}) (*Cache, error) {
-//	            return &Cache{Addr: "redis://localhost"}, nil
-//	        }),
 //	    )
 //
-//	    // Inject dependencies
+//	    // Inject
 //	    svc := godi.MustInject[*Service](c)
 //	    fmt.Printf("Service DB: %s, Cache: %s\n", svc.DB.Conn, svc.Cache.Addr)
 //
-//	    // Execute cleanup hook
+//	    // Cleanup
 //	    shutdown.Iterate(context.Background(), false)
 //	}
 //
@@ -349,16 +260,13 @@
 //
 // # Framework Comparison
 //
-//	┌─────────────────────────────────────────────────────────────────┐
-//	│                    Framework Comparison                         │
-//	├──────────────┬──────────┬──────────┬──────────┬───────────────┤
+//	┌──────────────┬──────────┬──────────┬──────────┬───────────────┐
 //	│    Feature   │   godi   │  dig/fx  │   wire   │  samber/do    │
 //	├──────────────┼──────────┼──────────┼──────────┼───────────────┤
 //	│   Type System│ Generics │Reflection│ Code Gen │   Generics    │
 //	│ Runtime Error│    No    │ Possible │    No    │    Possible   │
 //	│ Build Step   │    No    │    No    │ Required │      No       │
-//	│ API Style    │Functional│Functional│ Code Gen │   Functional  │
-//	│ Learn Curve  │   Low    │  Medium  │   High   │      Low      │
 //	│ Nesting      │    ✅    │    ❌    │    ❌    │      ❌       │
+//	│ Learn Curve  │   Low    │  Medium  │   High   │      Low      │
 //	└──────────────┴──────────┴──────────┴──────────┴───────────────┘
 package godi

@@ -225,11 +225,41 @@ func TestProvide_AllTypes(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"string", func() error { v, err := Inject[string](c); if err != nil || v != "test" { return fmt.Errorf("got %v", v) }; return nil }},
-		{"int", func() error { v, err := Inject[int](c); if err != nil || v != 42 { return fmt.Errorf("got %v", v) }; return nil }},
-		{"float64", func() error { v, err := Inject[float64](c); if err != nil || v != 3.14159 { return fmt.Errorf("got %v", v) }; return nil }},
-		{"[]string", func() error { v, err := Inject[[]string](c); if err != nil || len(v) != 3 { return fmt.Errorf("got %v", v) }; return nil }},
-		{"map", func() error { v, err := Inject[map[string]int](c); if err != nil || v["a"] != 1 { return fmt.Errorf("got %v", v) }; return nil }},
+		{"string", func() error {
+			v, err := Inject[string](c)
+			if err != nil || v != "test" {
+				return fmt.Errorf("got %v", v)
+			}
+			return nil
+		}},
+		{"int", func() error {
+			v, err := Inject[int](c)
+			if err != nil || v != 42 {
+				return fmt.Errorf("got %v", v)
+			}
+			return nil
+		}},
+		{"float64", func() error {
+			v, err := Inject[float64](c)
+			if err != nil || v != 3.14159 {
+				return fmt.Errorf("got %v", v)
+			}
+			return nil
+		}},
+		{"[]string", func() error {
+			v, err := Inject[[]string](c)
+			if err != nil || len(v) != 3 {
+				return fmt.Errorf("got %v", v)
+			}
+			return nil
+		}},
+		{"map", func() error {
+			v, err := Inject[map[string]int](c)
+			if err != nil || v["a"] != 1 {
+				return fmt.Errorf("got %v", v)
+			}
+			return nil
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -843,7 +873,7 @@ func TestContainer_Concurrent(t *testing.T) {
 			wantSuccess: 1,
 		},
 		{
-			name: "Nested_SingleLevel_DuplicatePrevention",
+			name:  "Nested_SingleLevel_DuplicatePrevention",
 			setup: func() *Container { return &Container{} },
 			operateFn: func(c *Container, id int, wg *sync.WaitGroup, errCh chan<- error) {
 				wg.Add(1)
@@ -862,7 +892,7 @@ func TestContainer_Concurrent(t *testing.T) {
 			wantSuccess: 1,
 		},
 		{
-			name: "Nested_MultipleChildren_ThreeTypes",
+			name:  "Nested_MultipleChildren_ThreeTypes",
 			setup: func() *Container { return &Container{} },
 			operateFn: func(c *Container, idx int, wg *sync.WaitGroup, errCh chan<- error) {
 				wg.Add(1)
@@ -896,7 +926,7 @@ func TestContainer_Concurrent(t *testing.T) {
 			wantSuccess: 3,
 		},
 		{
-			name: "Mixed_DirectAndNested",
+			name:  "Mixed_DirectAndNested",
 			setup: func() *Container { return &Container{} },
 			operateFn: func(c *Container, idx int, wg *sync.WaitGroup, errCh chan<- error) {
 				wg.Add(1)
@@ -1223,6 +1253,17 @@ func BenchmarkInject(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = Inject[Database](c)
+	}
+}
+
+func BenchmarkInjectAs(b *testing.B) {
+	c := &Container{}
+	c.MustAdd(Provide(Database{DSN: "test"}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	var db Database
+	for i := 0; i < b.N; i++ {
+		_ = InjectAs(&db, c)
 	}
 }
 

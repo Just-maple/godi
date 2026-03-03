@@ -250,14 +250,19 @@ type EnvConfig struct {
 
 c.MustAdd(
     godi.Provide(EnvConfig{Env: "production"}),
-    godi.Build(func(cfg EnvConfig) (Database, error) {
-        // Choose database from pre-created container
+    godi.Build(func(c *godi.Container) (string, error) {
+        cfg, _ := godi.Inject[EnvConfig](c)
+
+        // Dynamically add the appropriate container at runtime
         if cfg.Env == "production" {
-            db, _ := godi.Inject[Database](prodDB)
-            return db, nil
+            c.MustAdd(prodDB)
+        } else {
+            c.MustAdd(devDB)
         }
-        db, _ := godi.Inject[Database](devDB)
-        return db, nil
+
+        // Now inject from the current container
+        db, _ := godi.Inject[Database](c)
+        return "Connected to " + db.DSN, nil
     }),
 )
 ```

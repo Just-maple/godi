@@ -66,7 +66,6 @@ func main() {
 |--------|-------------|----------|
 | `Provide(T)` | Register instance value | Simple values, configuration |
 | `Build(func) (T, error)` | Register factory function (lazy, singleton) | Complex initialization |
-| `Chain(func) (T, error)` | Derive from existing dependency | Transform/derive new types |
 
 ```go
 c := &godi.Container{}
@@ -75,13 +74,21 @@ c := &godi.Container{}
 c.Add(godi.Provide(Config{Port: 8080}))
 
 // Build - Register factory function (lazy, singleton)
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    return NewDatabase("dsn")
+// Pattern 1: Single dependency (auto-injected)
+c.Add(godi.Build(func(cfg Config) (*Database, error) {
+    return NewDatabase(cfg.DSN)
 }))
 
-// Chain - Derive new dependency from existing one
-c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
-    return NewConnection(cfg.DSN)
+// Pattern 2: Container access (for multiple dependencies)
+c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
+    db, _ := godi.Inject[*Database](c)
+    cache, _ := godi.Inject[*Cache](c)
+    return NewService(db, cache), nil
+}))
+
+// Pattern 3: No dependency (using struct{})
+c.Add(godi.Build(func(_ struct{}) (*Logger, error) {
+    return NewLogger(), nil
 }))
 ```
 
@@ -561,7 +568,7 @@ infraShutdown.Iterate(ctx, false)
 appShutdown.Iterate(ctx, false)
 ```
 
-### 8. Transform with Chain
+### 8. Build with Dependency Chain
 
 ```go
 type Name string
@@ -569,7 +576,7 @@ type Length int
 
 c.MustAdd(
     godi.Provide(Name("hello")),
-    godi.Chain(func(s Name) (Length, error) {
+    godi.Build(func(s Name) (Length, error) {
         return Length(len(s)), nil
     }),
 )

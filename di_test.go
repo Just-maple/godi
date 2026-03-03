@@ -654,41 +654,167 @@ func TestNestedContainer_TypeDetection(t *testing.T) {
 	}
 }
 
-func TestChain(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide("input"),
-		Chain(func(s string) (int, error) { return len(s), nil }),
+func TestBuild_TableDriven(t *testing.T) {
+	type (
+		Name     string
+		Greeting string
+		S        string
+		I        int
+		R        string
+		A        int
+		B        int
+		Named    struct{}
+		Alias    = struct{}
 	)
-	v, err := Inject[int](c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v != 5 {
-		t.Errorf("expected 5, got %d", v)
-	}
-}
 
-func TestChain_Error(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide("input"),
-		Chain(func(s string) (int, error) { return 0, fmt.Errorf("chain error") }),
-	)
-	_, err := Inject[int](c)
-	if err == nil {
-		t.Fatal("expected chain error")
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) (any, error)
+		want     any
+		wantErr  bool
+	}{
+		{
+			name: "single dependency auto-inject",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return len(s), nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     5,
+			wantErr:  false,
+		},
+		{
+			name: "struct{} literal no dependency",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(struct{}) (int, error) { return 42, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     42,
+			wantErr:  false,
+		},
+		{
+			name: "struct{} type alias",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(Alias) (int32, error) { return 100, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int32](c) },
+			want:     int32(100),
+			wantErr:  false,
+		},
+		{
+			name: "var struct field inject",
+			setup: func() *Container {
+				c := &Container{}
+				var s struct{}
+				c.MustAdd(Provide(s), Build(func(struct{}) (int16, error) { return 7, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int16](c) },
+			want:     int16(7),
+			wantErr:  false,
+		},
+		{
+			name: "named struct requires Provide",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Named{}), Build(func(Named) (int64, error) { return 99, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int64](c) },
+			want:     int64(99),
+			wantErr:  false,
+		},
+		{
+			name: "Container multi-dep",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(A(10)), Provide(B(20)),
+					Build(func(c *Container) (int, error) {
+						a, _ := Inject[A](c)
+						b, _ := Inject[B](c)
+						return int(a) + int(b), nil
+					}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     30,
+			wantErr:  false,
+		},
+		{
+			name: "Container complex",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(Name("world")),
+					Build(func(c *Container) (Greeting, error) {
+						n, _ := Inject[Name](c)
+						return Greeting("hello " + string(n)), nil
+					}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[Greeting](c) },
+			want:     Greeting("hello world"),
+			wantErr:  false,
+		},
+		{
+			name: "dependency chain",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(S("hello")),
+					Build(func(s S) (I, error) { return I(len(s)), nil }),
+					Build(func(n I) (R, error) { return R(fmt.Sprintf("len:%d", n)), nil }),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[R](c) },
+			want:     R("len:5"),
+			wantErr:  false,
+		},
+		{
+			name: "build error",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return 0, fmt.Errorf("error") }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     0,
+			wantErr:  true,
+		},
+		{
+			name: "dependency not found",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(s string) (int, error) { return len(s), nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     0,
+			wantErr:  true,
+		},
 	}
-}
 
-func TestChain_DependencyError(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Chain(func(s string) (int, error) { return len(s), nil }),
-	)
-	_, err := Inject[int](c)
-	if err == nil {
-		t.Fatal("expected dependency error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			got, err := tt.injectFn(c)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("got = %v, want = %v", got, tt.want)
+			}
+		})
 	}
 }
 

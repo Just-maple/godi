@@ -123,13 +123,11 @@ func main() {
 	app.MustAdd(
 		services,
 		godi.Provide(Config{AppName: "nested-hook-demo"}),
-		godi.Build(func(c *godi.Container) (ServiceA, error) {
-			db, _ := godi.Inject[Database](c)
+		godi.Build(func(db Database) (ServiceA, error) {
 			return ServiceA{Name: "service-a", DB: db}, nil
 		}),
-		godi.Build(func(c *godi.Container) (ServiceB, error) {
-			cache, _ := godi.Inject[Cache](c)
-			log, _ := godi.Inject[Logger](c)
+		godi.Build(func(cache Cache) (ServiceB, error) {
+			log, _ := godi.Inject[Logger](app)
 			return ServiceB{Name: "service-b", Cache: cache, Log: log}, nil
 		}),
 	)

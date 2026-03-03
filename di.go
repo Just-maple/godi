@@ -17,31 +17,31 @@ func (p provider[T]) Provide(v any) (any, bool)                 { _, ok := v.(*T
 func (p provider[T]) inject(c *Container, ptr any) (any, error) { return p(c, ptr.(*T)) }
 
 func Provide[T any](v T) Provider {
-	return provider[T](func(c *Container, ptr *T) (T, error) { *ptr = v; return v, nil })
+	return provider[T](func(_ *Container, ptr *T) (T, error) { *ptr = v; return v, nil })
 }
 
-func Build[T any](f func(*Container) (T, error)) Provider {
+func Build[R, T any](f func(R) (T, error)) Provider {
 	l := new(struct {
 		value T
 		once  sync.Once
 		err   error
 	})
 	return provider[T](func(c *Container, ptr *T) (zero T, _ error) {
-		if l.once.Do(func() { l.value, l.err = f(c) }); l.err != nil {
+		var v R
+		switch pr := any(&v).(type) {
+		case *struct{}:
+		case **Container:
+			*pr = c
+		default:
+			if e := InjectTo[R](c, &v); e != nil {
+				return zero, e
+			}
+		}
+		if l.once.Do(func() { l.value, l.err = f(v) }); l.err != nil {
 			return zero, fmt.Errorf("build %T error: %w", l.value, l.err)
 		}
 		*ptr = l.value
 		return l.value, nil
-	})
-}
-
-func Chain[R any, T any](f func(r R) (T, error)) Provider {
-	return Build(func(c *Container) (zero T, err error) {
-		r, err := Inject[R](c)
-		if err != nil {
-			return zero, err
-		}
-		return f(r)
 	})
 }
 

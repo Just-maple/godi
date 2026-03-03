@@ -6,33 +6,40 @@ This directory contains examples demonstrating various features of the godi depe
 
 | # | Example | Description | Key Features |
 |---|---------|-------------|--------------|
-| 01 | [basic](01-basic/) | Basic dependency injection | Provide, Inject |
-| 02 | [error-handling](02-error-handling/) | Error handling patterns | Add, Inject with error returns |
-| 03 | [must-inject](03-must-inject/) | Panic-on-error injection | MustAdd, MustInject, MustInjectTo |
-| 04 | [all-types](04-all-types/) | All supported types | Structs, pointers, slices, maps, functions |
-| 05 | [concurrent](05-concurrent/) | Concurrent access | Thread-safe operations |
-| 06 | [generics](06-generics/) | Generic type injection | Type parameters, constructor injection |
-| 07 | [testing-mock](07-testing-mock/) | Testing with mocks | Interface-based testing, DI |
-| 08 | [web-app](08-web-app/) | Production web app | SOLID principles, DIP, layered architecture |
-| 09 | [lifecycle-cleanup](09-lifecycle-cleanup/) | Resource cleanup | Lifecycle hooks, graceful shutdown |
-| 10 | [chain](10-chain/) | Dependency transformation | Chain, Build, constructor injection |
-| 11 | [struct-field-inject](11-struct-field-inject/) | Struct field injection | Inject multiple fields |
-| 12 | [hook](12-hook/) | Hook lifecycle management | Hook, HookOnce, startup/shutdown |
-| 13 | [nested-container-hooks](13-nested-container-hooks/) | Nested container hooks | Multi-level containers, hook propagation |
+| 01 | [basic](01-basic/) | Basic dependency injection | Provide, Build patterns, struct field injection, dependency chains |
+| 02 | [error-handling](02-error-handling/) | Error handling patterns | Add/Inject vs MustAdd/MustInject |
+| 03 | [all-types](03-all-types/) | All supported types + generics | Structs, pointers, slices, maps, generics, interfaces |
+| 04 | [concurrent](04-concurrent/) | Concurrent access | Thread-safe operations |
+| 05 | [testing-mock](05-testing-mock/) | Testing with mocks | Interface-based testing, DI |
+| 06 | [web-app](06-web-app/) | Production web app | SOLID principles, DIP, layered architecture |
+| 07 | [lifecycle-cleanup](07-lifecycle-cleanup/) | Lifecycle & hooks | Hook, HookOnce, startup/shutdown, graceful cleanup |
+| 08 | [nested-container-hooks](08-nested-container-hooks/) | Nested container hooks | Multi-level containers, hook propagation |
 
 ## Quick Start
 
 ```bash
-# Run basic example
+# Run basic example (Provide, Build, field injection, chains)
 cd examples/01-basic
 go run main.go
 
+# Run error handling example (Add/Inject vs MustAdd/MustInject)
+cd examples/02-error-handling
+go run main.go
+
+# Run all types example (including generics)
+cd examples/03-all-types
+go run main.go
+
 # Run web app example (best practices)
-cd examples/08-web-app
+cd examples/06-web-app
 go run cmd/main.go
 
+# Run lifecycle & hooks example
+cd examples/07-lifecycle-cleanup
+go run main.go
+
 # Run nested container hooks example
-cd examples/13-nested-container-hooks
+cd examples/08-nested-container-hooks
 go run main.go
 ```
 
@@ -47,11 +54,24 @@ c.Add(godi.Provide(MyService{}))
 service, err := godi.Inject[MyService](c)
 ```
 
-### 2. Build
+### 2. Build Patterns
 
 ```go
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    return ConnectDB("dsn")
+// Pattern 1: Single dependency (auto-injected)
+c.Add(godi.Build(func(cfg Config) (*Database, error) {
+    return ConnectDB(cfg.DSN)
+}))
+
+// Pattern 2: Container access (multiple dependencies)
+c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
+    db, _ := godi.Inject[*Database](c)
+    cache, _ := godi.Inject[*Cache](c)
+    return NewService(db, cache), nil
+}))
+
+// Pattern 3: No dependency (struct{})
+c.Add(godi.Build(func(_ struct{}) (*Logger, error) {
+    return NewLogger(), nil
 }))
 ```
 
@@ -67,7 +87,7 @@ service := godi.MustInject[MyService](c)
 
 ### 4. Dependency Inversion
 
-See [08-web-app](08-web-app/) for production-ready example using interfaces:
+See [06-web-app](06-web-app/) for production-ready example using interfaces:
 
 ```go
 // Register interface, not concrete type
@@ -83,7 +103,7 @@ type Service struct {
 
 ## Best Practices
 
-1. **Use interfaces for cross-layer dependencies** (see 08-web-app)
+1. **Use interfaces for cross-layer dependencies** (see 06-web-app)
 2. **Use Build for expensive resources** (database connections, etc.)
 3. **Use Add/Inject for recoverable errors**
 4. **Use MustAdd/MustInject for required dependencies**

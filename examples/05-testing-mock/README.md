@@ -38,22 +38,16 @@ func NewUserService(db Database) *UserService {
 
 // Production container with real database
 prodContainer.MustAdd(
-    godi.Provide(func() Database {
-        return &RealDatabase{DSN: "mysql://localhost/prod"}
-    }()),
-    godi.Build(func(c *godi.Container) (*UserService, error) {
-        db, _ := godi.Inject[Database](c)
+    godi.Provide[Database](&RealDatabase{DSN: "mysql://localhost/prod"}),
+    godi.Build(func(db Database) (*UserService, error) {
         return NewUserService(db), nil
     }),
 )
 
 // Test container with mock
 testContainer.MustAdd(
-    godi.Provide(func() Database {
-        return &MockDatabase{Data: mockData}
-    }()),
-    godi.Build(func(c *godi.Container) (*UserService, error) {
-        db, _ := godi.Inject[Database](c)
+    godi.Provide[Database](mockDB),
+    godi.Build(func(db Database) (*UserService, error) {
         return NewUserService(db), nil
     }),
 )

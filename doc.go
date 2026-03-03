@@ -42,11 +42,34 @@
 //	  c := &godi.Container{}
 //	  c.Add(
 //	      godi.Provide(Config{DSN: "mysql://localhost"}),
-//	      godi.Build(func(c *godi.Container) (*Database, error) {
-//	          cfg, _ := godi.Inject[Config](c)
+//	      godi.Build(func(cfg Config) (*Database, error) {
 //	          return &Database{Conn: cfg.DSN}, nil
 //	      }),
+//	      godi.Build(func(db *Database) (*Service, error) {
+//	          return &Service{DB: db}, nil
+//	      }),
 //	  )
+//
+// # Build Function Patterns
+//
+// Build supports three dependency injection patterns:
+//
+//  1. Single Dependency (auto-injected):
+//     godi.Build(func(cfg Config) (*Database, error) {
+//     return &Database{DSN: cfg.DSN}, nil
+//     })
+//
+//  2. Container Access (manual multi-inject):
+//     godi.Build(func(c *godi.Container) (*Service, error) {
+//     db, _ := godi.Inject[*Database](c)
+//     cache, _ := godi.Inject[*Cache](c)
+//     return &Service{DB: db, Cache: cache}, nil
+//     })
+//
+//  3. No Dependency (struct{}):
+//     godi.Build(func(_ struct{}) (*Logger, error) {
+//     return &Logger{Name: "app"}, nil
+//     })
 //
 // # Injection Flow
 //
@@ -162,8 +185,9 @@
 //
 //	  // Add dependencies
 //	  c.MustAdd(
-//	      godi.Build(func(c *godi.Container) (*Database, error) {
-//	          return NewDatabase("dsn")
+//	      godi.Provide(Config{DSN: "dsn"}),
+//	      godi.Build(func(cfg Config) (*Database, error) {
+//	          return NewDatabase(cfg.DSN), nil
 //	      }),
 //	  )
 //
@@ -229,14 +253,14 @@
 //	  parent := &godi.Container{}
 //	  child := &godi.Container{}
 //
-//	  child.MustAdd(godi.Build(func(c *godi.Container) (ServiceA, error) {
+//	  child.MustAdd(godi.Build(func(db Database) (ServiceA, error) {
 //	      // A depends on B
-//	      return godi.Inject[ServiceB](c)
+//	      return db, nil
 //	  }))
 //
-//	  parent.MustAdd(child, godi.Build(func(c *godi.Container) (ServiceB, error) {
+//	  parent.MustAdd(child, godi.Build(func(svc ServiceA) (ServiceB, error) {
 //	      // B depends on A (circular!)
-//	      return godi.Inject[ServiceA](c)
+//	      return svc, nil
 //	  }))
 //
 //	  // Trigger circular dependency detection
@@ -261,8 +285,13 @@
 //	    Conn string
 //	}
 //
+//	type Cache struct {
+//	    Addr string
+//	}
+//
 //	type Service struct {
-//	    DB *Database
+//	    DB    *Database
+//	    Cache *Cache
 //	}
 //
 //	func main() {
@@ -275,22 +304,32 @@
 //	        }
 //	    })
 //
-//	    // Add dependencies
+//	    // Add dependencies using different Build patterns
 //	    c.MustAdd(
+//	        // Pattern 1: Provide value
 //	        godi.Provide(Config{DSN: "mysql://localhost"}),
-//	        godi.Build(func(c *godi.Container) (*Database, error) {
-//	            cfg, _ := godi.Inject[Config](c)
+//
+//	        // Pattern 2: Single dependency (auto-injected)
+//	        godi.Build(func(cfg Config) (*Database, error) {
 //	            return &Database{Conn: cfg.DSN}, nil
 //	        }),
+//
+//	        // Pattern 3: Container access for multiple dependencies
 //	        godi.Build(func(c *godi.Container) (*Service, error) {
 //	            db, _ := godi.Inject[*Database](c)
-//	            return &Service{DB: db}, nil
+//	            cache, _ := godi.Inject[*Cache](c)
+//	            return &Service{DB: db, Cache: cache}, nil
+//	        }),
+//
+//	        // Pattern 4: No dependency (struct{})
+//	        godi.Build(func(_ struct{}) (*Cache, error) {
+//	            return &Cache{Addr: "redis://localhost"}, nil
 //	        }),
 //	    )
 //
 //	    // Inject dependencies
 //	    svc := godi.MustInject[*Service](c)
-//	    fmt.Printf("Service DB: %s\n", svc.DB.Conn)
+//	    fmt.Printf("Service DB: %s, Cache: %s\n", svc.DB.Conn, svc.Cache.Addr)
 //
 //	    // Execute cleanup hook
 //	    shutdown.Iterate(context.Background(), false)

@@ -40,34 +40,16 @@ func NewAppContainer() *godi.Container {
 	// Note: We register concrete types but depend on interfaces in upper layers
 	c.MustAdd(
 		godi.Provide(config.NewConfig()),
-		godi.Build(func(c *godi.Container) (interfaces.Database, error) {
-			cfg, err := godi.Inject[*config.Config](c)
-			if err != nil {
-				return nil, err
-			}
-			db := infrastructure.NewDBConnection(cfg.DatabaseDSN)
-			return db, nil
+		godi.Build(func(cfg *config.Config) (interfaces.Database, error) {
+			return infrastructure.NewDBConnection(cfg.DatabaseDSN), nil
 		}),
-		godi.Build(func(c *godi.Container) (interfaces.Cache, error) {
-			cfg, err := godi.Inject[*config.Config](c)
-			if err != nil {
-				return nil, err
-			}
-			cache := infrastructure.NewCacheClient(cfg.CacheAddr)
-			return cache, nil
+		godi.Build(func(cfg *config.Config) (interfaces.Cache, error) {
+			return infrastructure.NewCacheClient(cfg.CacheAddr), nil
 		}),
-		godi.Build(func(c *godi.Container) (repository.UserRepositoryInterface, error) {
-			db, err := godi.Inject[interfaces.Database](c)
-			if err != nil {
-				return nil, err
-			}
+		godi.Build(func(db interfaces.Database) (repository.UserRepositoryInterface, error) {
 			return repository.NewUserRepository(db), nil
 		}),
-		godi.Build(func(c *godi.Container) (service.UserServiceInterface, error) {
-			repo, err := godi.Inject[repository.UserRepositoryInterface](c)
-			if err != nil {
-				return nil, err
-			}
+		godi.Build(func(repo repository.UserRepositoryInterface) (service.UserServiceInterface, error) {
 			cache, err := godi.Inject[interfaces.Cache](c)
 			if err != nil {
 				return nil, err
@@ -75,29 +57,17 @@ func NewAppContainer() *godi.Container {
 			return service.NewUserService(repo, cache), nil
 		}),
 		godi.Provide(handler.NewRouter()),
-		godi.Build(func(c *godi.Container) (interfaces.Handler, error) {
-			svc, err := godi.Inject[service.UserServiceInterface](c)
-			if err != nil {
-				return nil, err
-			}
+		godi.Build(func(svc service.UserServiceInterface) (interfaces.Handler, error) {
 			router, err := godi.Inject[*handler.Router](c)
 			if err != nil {
 				return nil, err
 			}
 			return handler.NewUserHandler(svc, router), nil
 		}),
-		godi.Build(func(c *godi.Container) (interfaces.Middleware, error) {
-			cfg, err := godi.Inject[*config.Config](c)
-			if err != nil {
-				return nil, err
-			}
+		godi.Build(func(cfg *config.Config) (interfaces.Middleware, error) {
 			return middleware.NewLoggingMiddleware(cfg.Debug), nil
 		}),
-		godi.Build(func(c *godi.Container) (*app.App, error) {
-			cfg, err := godi.Inject[*config.Config](c)
-			if err != nil {
-				return nil, err
-			}
+		godi.Build(func(cfg *config.Config) (*app.App, error) {
 			router := app.NewRouter()
 			h, err := godi.Inject[interfaces.Handler](c)
 			if err != nil {

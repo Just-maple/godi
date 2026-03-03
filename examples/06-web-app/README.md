@@ -27,7 +27,7 @@ This example demonstrates a production-ready Go web application structure using 
 ## Directory Structure
 
 ```
-examples/09-web-app/
+examples/06-web-app/
 ├── cmd/
 │   └── main.go              # Application entry point
 ├── internal/

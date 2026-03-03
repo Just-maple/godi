@@ -66,7 +66,6 @@ func main() {
 |------|------|----------|
 | `Provide(T)` | 注册实例值 | 简单值、配置 |
 | `Build(func) (T, error)` | 注册工厂函数（懒加载，单例） | 复杂初始化 |
-| `Chain(func) (T, error)` | 从现有依赖派生 | 类型转换/派生新类型 |
 
 ```go
 c := &godi.Container{}
@@ -75,13 +74,21 @@ c := &godi.Container{}
 c.Add(godi.Provide(Config{Port: 8080}))
 
 // Build - 注册工厂函数（懒加载，单例）
-c.Add(godi.Build(func(c *godi.Container) (*Database, error) {
-    return NewDatabase("dsn")
+// 模式 1: 单个依赖（自动注入）
+c.Add(godi.Build(func(cfg Config) (*Database, error) {
+    return NewDatabase(cfg.DSN)
 }))
 
-// Chain - 从现有依赖派生新依赖
-c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
-    return NewConnection(cfg.DSN)
+// 模式 2: 容器访问（用于多个依赖）
+c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
+    db, _ := godi.Inject[*Database](c)
+    cache, _ := godi.Inject[*Cache](c)
+    return NewService(db, cache), nil
+}))
+
+// 模式 3: 无依赖（使用 struct{}）
+c.Add(godi.Build(func(_ struct{}) (*Logger, error) {
+    return NewLogger(), nil
 }))
 ```
 
@@ -561,7 +568,7 @@ infraShutdown.Iterate(ctx, false)
 appShutdown.Iterate(ctx, false)
 ```
 
-### 8. Chain 转换
+### 8. Build 依赖链
 
 ```go
 type Name string
@@ -569,7 +576,7 @@ type Length int
 
 c.MustAdd(
     godi.Provide(Name("hello")),
-    godi.Chain(func(s Name) (Length, error) {
+    godi.Build(func(s Name) (Length, error) {
         return Length(len(s)), nil
     }),
 )

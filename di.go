@@ -132,9 +132,8 @@ func (c *Container) Inject(ptrs ...any) error {
 }
 
 func InjectTo[T any](c *Container, ptr *T) (err error) {
-	id := (*T)(nil)
-	if p, ok := c.providers.Load(id); ok {
-		_, err = c.from(p.(Provider), id, ptr)
+	if p, ok := c.providers.Load((*T)(nil)); ok {
+		_, err = c.from(p.(Provider), (*T)(nil), ptr)
 	} else {
 		_, err = c.inject(c, ptr)
 	}

@@ -628,17 +628,13 @@ len := godi.MustInject[Length](c) // 5
 |---|------|------|
 | 01 | [basic](examples/01-basic/) | 基础注入模式 |
 | 02 | [error-handling](examples/02-error-handling/) | 错误处理策略 |
-| 03 | [must-inject](examples/03-must-inject/) | Panic 模式注入 |
-| 04 | [all-types](examples/04-all-types/) | 所有支持的类型 |
-| 05 | [concurrent](examples/05-concurrent/) | 并发安全 |
-| 06 | [generics](examples/06-generics/) | 高级泛型 |
-| 07 | [testing-mock](examples/07-testing-mock/) | Mock 测试模式 |
-| 08 | [web-app](examples/08-web-app/) | 生产级 Web 应用结构 |
-| 09 | [lifecycle-cleanup](examples/09-lifecycle-cleanup/) | Hook 资源清理 |
-| 10 | [chain](examples/10-chain/) | 依赖转换 |
-| 11 | [struct-field-inject](examples/11-struct-field-inject/) | 结构体字段注入 |
-| 12 | [hook](examples/12-hook/) | Hook 生命周期管理 |
-| 13 | [nested-container-hooks](examples/13-nested-container-hooks/) | 多层容器 Hooks |
+| 03 | [all-types](examples/03-all-types/) | 所有支持的类型 + 泛型 |
+| 04 | [concurrent](examples/04-concurrent/) | 并发安全 |
+| 05 | [testing-mock](examples/05-testing-mock/) | Mock 测试模式 |
+| 06 | [web-app](examples/06-web-app/) | 生产级 Web 应用（SOLID 原则） |
+| 07 | [lifecycle-cleanup](examples/07-lifecycle-cleanup/) | Hook 资源清理 |
+| 08 | [nested-container-hooks](examples/08-nested-container-hooks/) | 多层容器 Hooks |
+| 09 | [runtime-container-add](examples/09-runtime-container-add/) | 动态容器注册 |
 
 ## 🤝 贡献
 

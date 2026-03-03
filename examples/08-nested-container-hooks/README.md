@@ -37,7 +37,7 @@ When injecting `Database` from the `app` container:
 ## Running the Example
 
 ```bash
-cd examples/13-nested-container-hooks
+cd examples/08-nested-container-hooks
 go run main.go
 ```
 
@@ -55,3 +55,12 @@ The example tracks hook calls for each container level and prints a summary:
 - App container: All types including Config, ServiceA, ServiceB
 
 All counters should show exactly 1 call per type per container, demonstrating proper singleton behavior and hook propagation.
+
+## Related: Runtime Container Add
+
+For an example of dynamically adding containers during Build execution, see [examples/14-runtime-container-add](../14-runtime-container-add/).
+
+This pattern allows:
+- Conditional dependency selection based on runtime values
+- Plugin architecture with dynamic registration
+- Feature flag-based dependency injection

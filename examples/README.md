@@ -14,6 +14,7 @@ This directory contains examples demonstrating various features of the godi depe
 | 06 | [web-app](06-web-app/) | Production web app | SOLID principles, DIP, layered architecture |
 | 07 | [lifecycle-cleanup](07-lifecycle-cleanup/) | Lifecycle & hooks | Hook, HookOnce, startup/shutdown, graceful cleanup |
 | 08 | [nested-container-hooks](08-nested-container-hooks/) | Nested container hooks | Multi-level containers, hook propagation |
+| 09 | [runtime-container-add](09-runtime-container-add/) | Dynamic container registration | Environment-based selection, conditional features, interface selection |
 
 ## Quick Start
 
@@ -40,6 +41,10 @@ go run main.go
 
 # Run nested container hooks example
 cd examples/08-nested-container-hooks
+go run main.go
+
+# Run runtime container add example (dynamic registration)
+cd examples/09-runtime-container-add
 go run main.go
 ```
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -1590,18 +1592,161 @@ func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected circular dependency error")
 	}
-	if !contains(err.Error(), "circular dependency") {
+	if !strings.Contains(err.Error(), "circular dependency") {
 		t.Errorf("expected 'circular dependency' error, got: %v", err)
 	}
 	t.Log(err)
 }
 
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func TestNestedContainer_RuntimeAdd(t *testing.T) {
+	tests := []struct {
+		name           string
+		initialFloat   float64
+		wantStr        string
+		wantIntErr     bool
+		wantNestedType string
+	}{
+		{
+			name:         "NegativeValue_AddsNegativeContainer",
+			initialFloat: -0.1,
+			wantStr:      "-100",
+			wantIntErr:   true,
+		},
+		{
+			name:         "PositiveValue_AddsPositiveContainer",
+			initialFloat: 0.5,
+			wantStr:      "100",
+			wantIntErr:   true,
+		},
 	}
-	return false
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Container{}
+			positive := (&Container{}).MustAdd(Provide(100))
+			negative := (&Container{}).MustAdd(Provide(-100))
+
+			c.MustAdd(
+				Provide(tt.initialFloat),
+				Build(func(c *Container) (str string, err error) {
+					f, err := Inject[float64](c)
+					if err != nil {
+						return
+					}
+					if f > 0 {
+						c.MustAdd(positive)
+					} else {
+						c.MustAdd(negative)
+					}
+					i, err := Inject[int](c)
+					if err != nil {
+						return
+					}
+					return strconv.Itoa(i), nil
+				}),
+			)
+
+			str, err := Inject[string](c)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if str != tt.wantStr {
+				t.Errorf("got string %s, want %s", str, tt.wantStr)
+			}
+
+			if v, e := Inject[int](c); (e != nil) != tt.wantIntErr {
+				t.Errorf("Inject[int] error = %v, wantErr %v", e, tt.wantIntErr)
+			} else if e == nil {
+				t.Logf("Injected int from nested container: %d", v)
+			}
+		})
+	}
+}
+
+func TestNestedContainer_RuntimeAdd_MultipleLevels(t *testing.T) {
+	type Config struct{ Env string }
+	type DB struct{ DSN string }
+
+	c := &Container{}
+	prodDB := (&Container{}).MustAdd(Provide(DB{DSN: "prod-db"}))
+	testDB := (&Container{}).MustAdd(Provide(DB{DSN: "test-db"}))
+
+	c.MustAdd(
+		Provide(Config{Env: "production"}),
+		Build(func(c *Container) (string, error) {
+			cfg, err := Inject[Config](c)
+			if err != nil {
+				return "", err
+			}
+			if cfg.Env == "production" {
+				c.MustAdd(prodDB)
+			} else {
+				c.MustAdd(testDB)
+			}
+			db, err := Inject[DB](c)
+			if err != nil {
+				return "", err
+			}
+			return "connected to " + db.DSN, nil
+		}),
+	)
+
+	msg, err := Inject[string](c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "connected to prod-db" {
+		t.Errorf("got %s, want connected to prod-db", msg)
+	}
+}
+
+func TestNestedContainer_RuntimeAdd_DuplicatePrevention(t *testing.T) {
+	c := &Container{}
+	existing := (&Container{}).MustAdd(Provide("existing"))
+
+	c.MustAdd(
+		Provide(42),
+		Build(func(c *Container) (string, error) {
+			c.MustAdd(existing)
+			i, _ := Inject[int](c)
+			return fmt.Sprintf("value-%d", i), nil
+		}),
+	)
+
+	if _, err := Inject[string](c); err != nil {
+		t.Fatal(err)
+	}
+
+	err := c.Add(Provide("duplicate"))
+	if err == nil {
+		t.Error("expected duplicate error when adding after runtime add")
+	}
+}
+
+func TestNestedContainer_RuntimeAdd_ConditionalChain(t *testing.T) {
+	type Level1 struct{ Val string }
+	type Level2 struct{ Val string }
+
+	c := &Container{}
+	level1Container := (&Container{}).MustAdd(Provide(Level1{Val: "from-level1"}))
+
+	c.MustAdd(
+		Build(func(c *Container) (Level2, error) {
+			c.MustAdd(level1Container)
+			l1, err := Inject[Level1](c)
+			if err != nil {
+				return Level2{}, err
+			}
+			return Level2{Val: "level2-depends-on-" + l1.Val}, nil
+		}),
+	)
+
+	l2, err := Inject[Level2](c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "level2-depends-on-from-level1"
+	if l2.Val != expected {
+		t.Errorf("got %s, want %s", l2.Val, expected)
+	}
 }

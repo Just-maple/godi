@@ -628,17 +628,13 @@ Complete examples available in [`examples/`](examples/):
 |---|---------|-------------|
 | 01 | [basic](examples/01-basic/) | Basic injection patterns |
 | 02 | [error-handling](examples/02-error-handling/) | Error handling strategies |
-| 03 | [must-inject](examples/03-must-inject/) | Panic-mode injection |
-| 04 | [all-types](examples/04-all-types/) | All supported types |
-| 05 | [concurrent](examples/05-concurrent/) | Concurrent safety |
-| 06 | [generics](examples/06-generics/) | Advanced generics |
-| 07 | [testing-mock](examples/07-testing-mock/) | Mock testing patterns |
-| 08 | [web-app](examples/08-web-app/) | Production web app structure |
-| 09 | [lifecycle-cleanup](examples/09-lifecycle-cleanup/) | Resource cleanup with hooks |
-| 10 | [chain](examples/10-chain/) | Dependency transformation |
-| 11 | [struct-field-inject](examples/11-struct-field-inject/) | Struct field injection |
-| 12 | [hook](examples/12-hook/) | Hook lifecycle management |
-| 13 | [nested-container-hooks](examples/13-nested-container-hooks/) | Multi-level container hooks |
+| 03 | [all-types](examples/03-all-types/) | All supported types + generics |
+| 04 | [concurrent](examples/04-concurrent/) | Concurrent safety |
+| 05 | [testing-mock](examples/05-testing-mock/) | Mock testing patterns |
+| 06 | [web-app](examples/06-web-app/) | Production web app with SOLID principles |
+| 07 | [lifecycle-cleanup](examples/07-lifecycle-cleanup/) | Resource cleanup with hooks |
+| 08 | [nested-container-hooks](examples/08-nested-container-hooks/) | Multi-level container hooks |
+| 09 | [runtime-container-add](examples/09-runtime-container-add/) | Dynamic container registration |
 
 ## 🤝 Contributing
 

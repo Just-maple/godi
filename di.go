@@ -36,7 +36,12 @@ func Build[R, T any](f func(R) (T, error)) Provider {
 		once  sync.Once
 		err   error
 	})
-	return provider[T](func(c *Container, ptr *T) (zero T, _ error) {
+	return provider[T](func(c *Container, ptr *T) (zero T, err error) {
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("panic: %v", e)
+			}
+		}()
 		var v R
 		switch pr := any(&v).(type) {
 		case *struct{}:

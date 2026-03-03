@@ -105,10 +105,7 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	if c.providers.Range(func(_, p any) bool {
 		pv := p.(Provider)
 		if value, ok = pv.Provide(ptr); ok {
-			cp := &Container{hooks: c.hooks}
-			c.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
-			parent.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
-			value, err = cp.from(pv, value, ptr)
+			value, err = c.from(pv, value, ptr, parent)
 		}
 		return !ok
 	}); !ok {
@@ -117,7 +114,7 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	return
 }
 
-func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
+func (c *Container) from(p Provider, id, ptr any, parent *Container) (v any, err error) {
 	type depends struct {
 		Container
 		depth int
@@ -136,15 +133,18 @@ func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
 		return nil, fmt.Errorf("circular dependency for %s <-> %s", typName(id), strings.Join(deps, " <- "))
 	}
 	cp, dep := &Container{hooks: c.hooks}, &depends{}
-	c.providers.Range(func(k, v interface{}) bool {
-		if k == id {
-			v = dep
-		} else if _, ok := v.(*depends); ok {
+	copyMap := func(k, v interface{}) bool {
+		if _, ok := v.(*depends); ok {
 			dep.depth += 1
 		}
 		cp.providers.Store(k, v)
 		return true
-	})
+	}
+	if c.providers.Range(copyMap); parent != nil {
+		parent.providers.Range(copyMap)
+	}
+	cp.providers.Store(id, dep)
+	cp.providers.Delete(locked)
 	if v, err = p.inject(cp, ptr); err == nil && cp.hooks != nil {
 		cp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
@@ -162,7 +162,7 @@ func (c *Container) Inject(ptrs ...any) error {
 
 func InjectTo[T any](c *Container, ptr *T) (err error) {
 	if p, ok := c.providers.Load((*T)(nil)); ok {
-		_, err = c.from(p.(Provider), (*T)(nil), ptr)
+		_, err = c.from(p.(Provider), (*T)(nil), ptr, nil)
 	} else {
 		_, err = c.inject(c, ptr)
 	}

@@ -1750,3 +1750,229 @@ func TestNestedContainer_RuntimeAdd_ConditionalChain(t *testing.T) {
 		t.Errorf("got %s, want %s", l2.Val, expected)
 	}
 }
+
+func TestNestedContainer_RuntimeAdd_NoFrozenError(t *testing.T) {
+	t.Run("RuntimeAdd_DoesNotTriggerFrozen", func(t *testing.T) {
+		c := &Container{}
+		nested := (&Container{}).MustAdd(Provide("nested-value"))
+
+		c.MustAdd(
+			Provide(42),
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(nested)
+				i, _ := Inject[int](c)
+				return fmt.Sprintf("val-%d", i), nil
+			}),
+		)
+
+		if _, err := Inject[string](c); err != nil {
+			t.Fatalf("Build function should not trigger frozen error: %v", err)
+		}
+
+		if v, err := Inject[string](c); err != nil {
+			t.Errorf("Re-injection failed: %v", err)
+		} else if v != "val-42" {
+			t.Errorf("got %s, want val-42", v)
+		}
+	})
+
+	t.Run("DirectAddToFrozenContainer_Error", func(t *testing.T) {
+		child := &Container{}
+		child.MustAdd(Provide("child-value"))
+
+		parent := &Container{}
+		parent.MustAdd(child)
+
+		err := child.Add(Provide("new-value"))
+		if err == nil {
+			t.Fatal("expected frozen error, got nil")
+		}
+		if !strings.Contains(err.Error(), "frozen") {
+			t.Errorf("expected 'frozen' error, got: %v", err)
+		}
+	})
+
+	t.Run("RuntimeAdd_MultipleContainers", func(t *testing.T) {
+		type V1 string
+		type V2 string
+		type V3 string
+
+		c := &Container{}
+		container1 := (&Container{}).MustAdd(Provide(V1("value1")))
+		container2 := (&Container{}).MustAdd(Provide(V2("value2")))
+		container3 := (&Container{}).MustAdd(Provide(V3("value3")))
+
+		c.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(container1)
+				c.MustAdd(container2)
+				c.MustAdd(container3)
+
+				v1, _ := Inject[V1](c)
+				return string(v1), nil
+			}),
+		)
+
+		v, err := Inject[string](c)
+		if err != nil {
+			t.Fatalf("Runtime add multiple containers failed: %v", err)
+		}
+		if v != "value1" {
+			t.Errorf("got %s, want value1", v)
+		}
+	})
+
+	t.Run("RuntimeAdd_NestedContainer_WithHooks", func(t *testing.T) {
+		type RuntimeDB struct{ DSN string }
+
+		c := &Container{}
+		nested := (&Container{}).MustAdd(Provide(RuntimeDB{DSN: "mysql://runtime"}))
+
+		hookCalled := 0
+		hook := c.HookOnce("test", func(v any) func(context.Context) {
+			return func(ctx context.Context) {
+				if _, ok := v.(RuntimeDB); ok {
+					hookCalled++
+				}
+			}
+		})
+
+		c.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(nested)
+				db, _ := Inject[RuntimeDB](c)
+				return db.DSN, nil
+			}),
+		)
+
+		result, err := Inject[string](c)
+		if err != nil {
+			t.Fatalf("Runtime add with hook failed: %v", err)
+		}
+		if result != "mysql://runtime" {
+			t.Errorf("got DSN %s, want mysql://runtime", result)
+		}
+
+		hook.Iterate(context.Background(), false)
+		if hookCalled != 1 {
+			t.Errorf("hook called %d times, want 1", hookCalled)
+		}
+	})
+
+	t.Run("RuntimeAdd_ChainedDependencies", func(t *testing.T) {
+		type A struct{ Val string }
+		type B struct{ Val string }
+		type C struct{ Val string }
+
+		c := &Container{}
+		containerA := (&Container{}).MustAdd(Provide(A{Val: "A"}))
+		containerB := (&Container{}).MustAdd(
+			Provide(B{Val: "B"}),
+			Build(func(c *Container) (string, error) {
+				a, _ := Inject[A](c)
+				b, _ := Inject[B](c)
+				return a.Val + "-" + b.Val, nil
+			}),
+		)
+
+		c.MustAdd(
+			Build(func(c *Container) (C, error) {
+				c.MustAdd(containerA)
+				c.MustAdd(containerB)
+				s, _ := Inject[string](c)
+				return C{Val: "C-" + s}, nil
+			}),
+		)
+
+		result, err := Inject[C](c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "C-A-B"
+		if result.Val != expected {
+			t.Errorf("got %s, want %s", result.Val, expected)
+		}
+	})
+
+	t.Run("RuntimeAdd_Isolation_Verification", func(t *testing.T) {
+		type V1 string
+		type V2 string
+
+		c1 := &Container{}
+		c1.MustAdd(Provide(V1("from-c1")))
+
+		c2 := &Container{}
+		c2.MustAdd(Provide(V2("from-c2")))
+
+		parent := &Container{}
+		parent.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(c1)
+				v1, _ := Inject[V1](c)
+				return string(v1), nil
+			}),
+		)
+
+		v1, err := Inject[string](parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v1 != "from-c1" {
+			t.Errorf("got %s, want from-c1", v1)
+		}
+
+		parent2 := &Container{}
+		parent2.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(c2)
+				v2, _ := Inject[V2](c)
+				return string(v2), nil
+			}),
+		)
+
+		v2, err := Inject[string](parent2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v2 != "from-c2" {
+			t.Errorf("got %s, want from-c2", v2)
+		}
+	})
+
+	t.Run("RuntimeAdd_VerifyContainerNotFrozen", func(t *testing.T) {
+		type Original string
+		type Added string
+
+		nested := &Container{}
+		nested.MustAdd(Provide(Original("original")))
+
+		parent := &Container{}
+		parent.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(nested)
+				v, _ := Inject[Original](c)
+				return string(v), nil
+			}),
+		)
+
+		v, err := Inject[string](parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != "original" {
+			t.Errorf("got %s, want original", v)
+		}
+
+		afterBuild := &Container{}
+		afterBuild.MustAdd(nested)
+		afterBuild.MustAdd(Provide(Added("added-after")))
+
+		v2, err := Inject[Original](afterBuild)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(v2) != "original" {
+			t.Errorf("got %s, want original", v2)
+		}
+	})
+}

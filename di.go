@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -113,31 +114,29 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 
 type depends struct {
 	Container
-	depends int
-	id      any
+	depth int
 }
-
-func (deps *depends) String() string { return typName(deps.id) }
 
 func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
 	stat, _ := c.providers.Load(id)
 	if _, ok := stat.(*depends); ok {
-		deps := make([]*depends, 0)
+		deps, depth := make([]string, 0), make(map[string]int)
 		c.providers.Range(func(k, v any) bool {
 			if vv, is := v.(*depends); is {
-				deps = append(deps, vv)
+				name := typName(k)
+				deps, depth[name] = append(deps, name), vv.depth
 			}
 			return true
 		})
-		sort.Slice(deps, func(i, j int) bool { return deps[i].depends > deps[j].depends })
-		return nil, fmt.Errorf("circular dependency for %s <-> %s", typName(id), deps)
+		sort.Slice(deps, func(i, j int) bool { return depth[deps[i]] > depth[deps[j]] })
+		return nil, fmt.Errorf("circular dependency for %s <-> %s", typName(id), strings.Join(deps, " <- "))
 	}
-	cp, dep := &Container{hooks: c.hooks}, &depends{id: id}
+	cp, dep := &Container{hooks: c.hooks}, &depends{}
 	c.providers.Range(func(k, v interface{}) bool {
 		if k == id {
 			v = dep
 		} else if _, ok := v.(*depends); ok {
-			dep.depends += 1
+			dep.depth += 1
 		}
 		cp.providers.Store(k, v)
 		return true

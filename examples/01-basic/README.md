@@ -40,13 +40,20 @@ c.MustAdd(
 ### Pattern 2b: Build with Container Access (Multiple Dependencies)
 
 ```go
+type DBConfig struct {
+    DSN string
+}
+
+type AppConfig struct {
+    AppName string
+}
+
 c.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Provide(Config{AppName: "multi-dep"}),
-    godi.Build(func(c *godi.Container) (Service, error) {
-        db, _ := godi.Inject[Database](c)
-        cfg, _ := godi.Inject[Config](c)
-        return Service{DB: db, Config: cfg}, nil
+    godi.Provide(DBConfig{DSN: "mysql://localhost"}),
+    godi.Provide(AppConfig{AppName: "multi-dep"}),
+    godi.Build(func(cfg DBConfig, app AppConfig) (Service, error) {
+        db := Database{DSN: cfg.DSN}
+        return Service{DB: db, Config: app}, nil
     }),
 )
 ```

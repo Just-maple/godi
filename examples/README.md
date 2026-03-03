@@ -68,11 +68,16 @@ c.Add(godi.Build(func(cfg Config) (*Database, error) {
 }))
 
 // Pattern 2: Container access (multiple dependencies)
-c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
-    db, _ := godi.Inject[*Database](c)
-    cache, _ := godi.Inject[*Cache](c)
-    return NewService(db, cache), nil
-}))
+c.MustAdd(
+    godi.Provide(Config{Port: 8080}),
+    godi.Provide(Database{Conn: "mysql://localhost"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+    godi.Build(func(c *godi.Container) (*Service, error) {
+        db, _ := godi.Inject[Database](c)
+        cache, _ := godi.Inject[Cache](c)
+        return &Service{DB: db, Cache: cache}, nil
+    }),
+)
 
 // Pattern 3: No dependency (struct{})
 c.Add(godi.Build(func(_ struct{}) (*Logger, error) {
@@ -95,10 +100,17 @@ service := godi.MustInject[MyService](c)
 See [06-web-app](06-web-app/) for production-ready example using interfaces:
 
 ```go
+type DBConfig struct {
+    DSN string
+}
+
 // Register interface, not concrete type
-c.Add(godi.Build(func(c *godi.Container) (interfaces.Database, error) {
-    return infrastructure.NewDBConnection(dsn), nil
-}))
+c.MustAdd(
+    godi.Provide(DBConfig{DSN: "mysql://localhost"}),
+    godi.Build(func(cfg DBConfig) (interfaces.Database, error) {
+        return infrastructure.NewDBConnection(cfg.DSN), nil
+    }),
+)
 
 // Depend on abstraction
 type Service struct {

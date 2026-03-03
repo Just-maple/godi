@@ -41,8 +41,7 @@ func main() {
     
     c.MustAdd(
         godi.Provide(Config{DSN: "mysql://localhost"}),
-        godi.Build(func(c *godi.Container) (*Database, error) {
-            cfg, _ := godi.Inject[Config](c)
+        godi.Build(func(cfg Config) (*Database, error) {
             return &Database{Conn: cfg.DSN}, nil
         }),
     )
@@ -74,11 +73,16 @@ c.Add(godi.Build(func(cfg Config) (*Database, error) {
 }))
 
 // 模式 2: 容器访问（多个依赖）
-c.Add(godi.Build(func(c *godi.Container) (*Service, error) {
-    db, _ := godi.Inject[*Database](c)
-    cache, _ := godi.Inject[*Cache](c)
-    return NewService(db, cache), nil
-}))
+c.MustAdd(
+    godi.Provide(Config{Port: 8080}),
+    godi.Provide(Database{Conn: "mysql://localhost"}),
+    godi.Provide(Cache{Addr: "redis://localhost"}),
+    godi.Build(func(c *godi.Container) (*Service, error) {
+        db, _ := godi.Inject[Database](c)
+        cache, _ := godi.Inject[Cache](c)
+        return &Service{DB: db, Cache: cache}, nil
+    }),
+)
 
 // 模式 3: 无依赖（使用 struct{}）
 c.Add(godi.Build(func(_ struct{}) (*Logger, error) {
@@ -232,14 +236,30 @@ err := child.Add(godi.Provide(struct{ Name string }{Name: "new"}))
 
 ```go
 c := &godi.Container{}
-nested := &godi.Container{}
-nested.MustAdd(godi.Provide("value"))
 
-c.MustAdd(godi.Build(func(c *godi.Container) (string, error) {
-    // 这是允许的 - 在 Build 执行期间添加
-    c.MustAdd(nested)
-    return godi.Inject[string](c)
-}))
+// 为不同环境预创建容器
+prodDB := &godi.Container{}
+prodDB.MustAdd(godi.Provide(Database{DSN: "mysql://prod-db"}))
+
+devDB := &godi.Container{}
+devDB.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
+
+type EnvConfig struct {
+    Env string
+}
+
+c.MustAdd(
+    godi.Provide(EnvConfig{Env: "production"}),
+    godi.Build(func(cfg EnvConfig) (Database, error) {
+        // 从预创建的容器中选择数据库
+        if cfg.Env == "production" {
+            db, _ := godi.Inject[Database](prodDB)
+            return db, nil
+        }
+        db, _ := godi.Inject[Database](devDB)
+        return db, nil
+    }),
+)
 ```
 
 ## 📚 使用模式
@@ -247,13 +267,20 @@ c.MustAdd(godi.Build(func(c *godi.Container) (string, error) {
 ### 1. 构造函数注入
 
 ```go
+type DBConfig struct {
+    DSN string
+}
+
+type AppConfig struct {
+    AppName string
+}
+
 c.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Provide(Config{AppName: "my-app"}),
-    godi.Build(func(c *godi.Container) (*Service, error) {
-        db, _ := godi.Inject[Database](c)
-        cfg, _ := godi.Inject[Config](c)
-        return &Service{DB: db, Config: cfg}, nil
+    godi.Provide(DBConfig{DSN: "mysql://localhost"}),
+    godi.Provide(AppConfig{AppName: "my-app"}),
+    godi.Build(func(cfg DBConfig, app AppConfig) (*Service, error) {
+        db := &Database{Conn: cfg.DSN}
+        return &Service{DB: db, Config: app}, nil
     }),
 )
 ```
@@ -266,9 +293,16 @@ type Database interface {
     Close() error
 }
 
-c.Add(godi.Build(func(c *godi.Container) (Database, error) {
-    return NewMySQLDatabase(dsn), nil
-}))
+type DBConfig struct {
+    DSN string
+}
+
+c.MustAdd(
+    godi.Provide(DBConfig{DSN: "mysql://localhost"}),
+    godi.Build(func(cfg DBConfig) (Database, error) {
+        return NewMySQLDatabase(cfg.DSN), nil
+    }),
+)
 
 db, err := godi.Inject[Database](c)
 ```
@@ -276,24 +310,39 @@ db, err := godi.Inject[Database](c)
 ### 3. 环境选择（运行时添加）
 
 ```go
+// 为不同环境预创建容器
 prodDB := &godi.Container{}
 prodDB.MustAdd(godi.Provide(Database{DSN: "mysql://prod-db"}))
 
 devDB := &godi.Container{}
 devDB.MustAdd(godi.Provide(Database{DSN: "mysql://localhost"}))
 
+type EnvConfig struct {
+    Env string
+}
+
+// 运行时添加：根据配置动态添加容器
+c := &godi.Container{}
 c.MustAdd(
-    godi.Provide(Config{Env: "production"}),
-    godi.Build(func(c *godi.Container) (Database, error) {
-        cfg, _ := godi.Inject[Config](c)
+    godi.Provide(EnvConfig{Env: "production"}),
+    godi.Build(func(c *godi.Container) (string, error) {
+        cfg, _ := godi.Inject[EnvConfig](c)
+        
+        // 运行时动态添加合适的容器
         if cfg.Env == "production" {
             c.MustAdd(prodDB)
         } else {
             c.MustAdd(devDB)
         }
-        return godi.Inject[Database](c)
+        
+        // 从当前容器注入
+        db, _ := godi.Inject[Database](c)
+        return "Connected to " + db.DSN, nil
     }),
 )
+
+result, _ := godi.Inject[string](c)
+println(result)  // 输出：Connected to mysql://prod-db
 ```
 
 ### 4. 优雅关闭（Hook）
@@ -310,29 +359,36 @@ shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
     }
 })
 
+type DBConfig struct {
+    DSN string
+}
+
 c.MustAdd(
-    godi.Build(func(c *godi.Container) (*Database, error) {
-        return NewDatabase("dsn")
+    godi.Provide(DBConfig{DSN: "mysql://localhost"}),
+    godi.Build(func(cfg DBConfig) (*Database, error) {
+        return NewDatabase(cfg.DSN), nil
     }),
 )
 
 // 注入依赖（hook 会被注册）
 _, _ = godi.Inject[*Database](c)
-
-// 带超时执行
-ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-defer cancel()
-shutdown.Iterate(ctx, true)  // true = 逆序
 ```
 
 ### 5. 测试 Mock
 
 ```go
+type DBConfig struct {
+    DSN string
+}
+
 // 生产环境
 prod := &godi.Container{}
-prod.Add(godi.Build(func(c *godi.Container) (Database, error) {
-    return NewMySQLDatabase(prodDSN)
-}))
+prod.MustAdd(
+    godi.Provide(DBConfig{DSN: "mysql://prod"}),
+    godi.Build(func(cfg DBConfig) (Database, error) {
+        return NewMySQLDatabase(cfg.DSN), nil
+    }),
+)
 
 // 测试环境
 test := &godi.Container{}

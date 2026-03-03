@@ -93,19 +93,20 @@ prodDB.MustAdd(godi.Provide(Database{DSN: "mysql://prod-db:3306/app"}))
 devDB := &godi.Container{}
 devDB.MustAdd(godi.Provide(Database{DSN: "mysql://localhost:3306/dev"}))
 
+type EnvConfig struct {
+    Env string
+}
+
 c.MustAdd(
-    godi.Provide(Config{Env: Production}),
-    godi.Build(func(c *godi.Container) (Database, error) {
-        cfg, _ := godi.Inject[Config](c)
-        
-        switch cfg.Env {
-        case Production:
-            c.MustAdd(prodDB)
-        case Development:
-            c.MustAdd(devDB)
+    godi.Provide(EnvConfig{Env: "production"}),
+    godi.Build(func(cfg EnvConfig) (Database, error) {
+        // Choose appropriate database based on environment
+        if cfg.Env == "production" {
+            db, _ := godi.Inject[Database](prodDB)
+            return db, nil
         }
-        
-        return godi.Inject[Database](c)
+        db, _ := godi.Inject[Database](devDB)
+        return db, nil
     }),
 )
 ```
@@ -113,18 +114,21 @@ c.MustAdd(
 ### Pattern 2: Conditional Feature Registration
 
 ```go
+type AppConfig struct {
+    EnableCache bool
+}
+
+cacheContainer := &godi.Container{}
+cacheContainer.MustAdd(godi.Provide(Cache{Addr: "redis://localhost"}))
+
 c.MustAdd(
-    godi.Provide(Config{EnableCache: true}),
-    godi.Build(func(c *godi.Container) (Service, error) {
-        cfg, _ := godi.Inject[Config](c)
-        
+    godi.Provide(AppConfig{EnableCache: true}),
+    godi.Build(func(cfg AppConfig) (Service, error) {
+        var cache *Cache
         if cfg.EnableCache {
-            c.MustAdd(cacheContainer)
-            cache, _ := godi.Inject[Cache](c)
-            return NewServiceWithCache(cache)
+            cache, _ = godi.Inject[Cache](cacheContainer)
         }
-        
-        return NewServiceWithoutCache()
+        return NewService(cache), nil
     }),
 )
 ```
@@ -132,29 +136,29 @@ c.MustAdd(
 ### Pattern 3: Interface Implementation Selection
 
 ```go
+type EnvConfig struct {
+    Env string
+}
+
+// Mock repository container
 mockRepo := &godi.Container{}
 mockRepo.MustAdd(godi.Provide(func() UserRepository { return &MockUserRepository{} }()))
 
+// MySQL repository container
 mysqlRepo := &godi.Container{}
-mysqlRepo.MustAdd(
-    godi.Provide(Database{DSN: "mysql://localhost"}),
-    godi.Build(func(db Database) (UserRepository, error) {
-        return &MySQLUserRepository{db: db}, nil
-    }),
-)
+mysqlRepo.MustAdd(godi.Provide(func() UserRepository { 
+    return &MySQLUserRepository{dsn: "mysql://localhost"} 
+}()))
 
 c.MustAdd(
-    godi.Provide(Config{Env: Test}),
-    godi.Build(func(c *godi.Container) (UserRepository, error) {
-        cfg, _ := godi.Inject[Config](c)
-        
-        if cfg.Env == Test {
-            c.MustAdd(mockRepo)
-        } else {
-            c.MustAdd(mysqlRepo)
+    godi.Provide(EnvConfig{Env: "test"}),
+    godi.Build(func(cfg EnvConfig) (UserRepository, error) {
+        if cfg.Env == "test" {
+            repo, _ := godi.Inject[func() UserRepository](mockRepo)
+            return repo(), nil
         }
-        
-        return godi.Inject[UserRepository](c)
+        repo, _ := godi.Inject[func() UserRepository](mysqlRepo)
+        return repo(), nil
     }),
 )
 ```
@@ -197,14 +201,28 @@ err := child.Add(godi.Provide(struct{ Name string }{Name: "new"}))
 
 ```go
 c := &godi.Container{}
-nested := &godi.Container{}
-nested.MustAdd(godi.Provide("value"))
+
+// Pre-create containers with different values
+containerA := &godi.Container{}
+containerA.MustAdd(godi.Provide(Database{DSN: "mysql://db-a"}))
+
+containerB := &godi.Container{}
+containerB.MustAdd(godi.Provide(Database{DSN: "mysql://db-b"}))
+
+type Config struct {
+    UseA bool
+}
 
 c.MustAdd(
-    godi.Build(func(c *godi.Container) (string, error) {
-        // This is OK - adding during Build execution
-        c.MustAdd(nested)
-        return godi.Inject[string](c)
+    godi.Provide(Config{UseA: true}),
+    godi.Build(func(cfg Config) (Database, error) {
+        // Choose container at runtime based on config
+        if cfg.UseA {
+            db, _ := godi.Inject[Database](containerA)
+            return db, nil
+        }
+        db, _ := godi.Inject[Database](containerB)
+        return db, nil
     }),
 )
 ```

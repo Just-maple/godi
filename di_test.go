@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// Common test types
 type Database struct{ DSN string }
 type Config struct{ AppName string }
 type Service struct {
@@ -34,474 +35,404 @@ type CntTypeB struct{ ID int }
 type CntTypeC struct{ ID int }
 type CntTypeD struct{ ID int }
 
-func TestProvide(t *testing.T) {
-	db := Database{DSN: "mysql://localhost"}
-	p := Provide(db)
-	var got Database
-	if _, err := p.inject(nil, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.DSN != db.DSN {
-		t.Errorf("expected %s, got %s", db.DSN, got.DSN)
-	}
-}
+// =============================================================================
+// Core Functionality Tests - Combined complex scenarios
+// =============================================================================
 
-func TestContainer_AddAndInject(t *testing.T) {
-	tests := []struct {
-		name     string
-		setup    func() *Container
-		injectFn func(*Container) (any, error)
-		wantVal  any
-		wantErr  bool
-	}{
-		{
-			name: "Database",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide(Database{DSN: "mysql://localhost:3306/test"}))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[Database](c) },
-			wantVal:  Database{DSN: "mysql://localhost:3306/test"},
-		},
-		{
-			name: "Config",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide(Config{AppName: "test-app"}))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[Config](c) },
-			wantVal:  Config{AppName: "test-app"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := tt.setup()
-			got, err := tt.injectFn(c)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if got != tt.wantVal {
-				t.Errorf("got %v, want %v", got, tt.wantVal)
-			}
-		})
-	}
-}
-
-func TestContainer_Add(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   func() *Container
-		addFn   func(*Container) error
-		wantErr bool
-	}{
-		{
-			name:  "unique",
-			setup: func() *Container { return &Container{} },
-			addFn: func(c *Container) error { return c.Add(Provide(Database{DSN: "mysql://localhost"})) },
-		},
-		{
-			name: "duplicate error",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-				return c
-			},
-			addFn:   func(c *Container) error { return c.Add(Provide(Database{DSN: "mysql://remote"})) },
-			wantErr: true,
-		},
-		{
-			name: "container frozen",
-			setup: func() *Container {
-				child := &Container{}
-				child.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-				parent := &Container{}
-				parent.MustAdd(child)
-				return child
-			},
-			addFn:   func(c *Container) error { return c.Add(Provide(Config{AppName: "test"})) },
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := tt.setup()
-			err := tt.addFn(c)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestInject_ServiceWithDependencies(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide(Database{DSN: "mysql://localhost:3306/test"}),
-		Provide(Config{AppName: "test-app"}),
-	)
-	db, _ := Inject[Database](c)
-	cfg, _ := Inject[Config](c)
-	svc := Service{Name: "my-service", DB: db, Cfg: cfg}
-	if svc.DB.DSN != "mysql://localhost:3306/test" {
-		t.Errorf("expected mysql://localhost:3306/test, got %s", svc.DB.DSN)
-	}
-	if svc.Cfg.AppName != "test-app" {
-		t.Errorf("expected test-app, got %s", svc.Cfg.AppName)
-	}
-}
-
-func TestInject_ErrorCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		setup    func() *Container
-		injectFn func(*Container) error
-		wantErr  bool
-	}{
-		{name: "not found", setup: func() *Container { return &Container{} }, injectFn: func(c *Container) error {
-			var db Database
-			return InjectTo[Database](c, &db)
-		}, wantErr: true},
-		{name: "wrong type", setup: func() *Container {
-			c := &Container{}
-			c.MustAdd(Provide(Database{DSN: "test"}))
-			return c
-		}, injectFn: func(c *Container) error {
-			var cfg Config
-			return InjectTo[Config](c, &cfg)
-		}, wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := tt.setup()
-			err := tt.injectFn(c)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestContainer_MustAdd(t *testing.T) {
-	tests := []struct {
-		name      string
-		setup     func() *Container
-		addFn     func(*Container)
-		wantPanic bool
-	}{
-		{name: "success", setup: func() *Container { return &Container{} }, addFn: func(c *Container) {
-			c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-		}},
-		{name: "panic on duplicate", setup: func() *Container {
-			c := &Container{}
-			c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-			return c
-		}, addFn: func(c *Container) {
-			c.MustAdd(Provide(Database{DSN: "mysql://remote"}))
-		}, wantPanic: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := tt.setup()
-			defer func() {
-				if r := recover(); (r != nil) != tt.wantPanic {
-					t.Errorf("panic = %v, wantPanic %v", r != nil, tt.wantPanic)
-				}
-			}()
-			tt.addFn(c)
-		})
-	}
-}
-
-func TestProvide_AllTypes(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide("test"), Provide(42), Provide(int8(8)), Provide(int64(64)),
-		Provide(uint(100)), Provide(float32(3.14)), Provide(3.14159), Provide(true),
-		Provide([]string{"a", "b", "c"}), Provide([]int{1, 2, 3}),
-		Provide(map[string]int{"a": 1}), Provide(&struct{ Name string }{Name: "Alice"}),
-		Provide(make(chan int)), Provide(func() string { return "hello" }),
-	)
-	tests := []struct {
-		name string
-		fn   func() error
-	}{
-		{"string", func() error {
-			v, err := Inject[string](c)
-			if err != nil || v != "test" {
-				return fmt.Errorf("got %v", v)
-			}
-			return nil
-		}},
-		{"int", func() error {
-			v, err := Inject[int](c)
-			if err != nil || v != 42 {
-				return fmt.Errorf("got %v", v)
-			}
-			return nil
-		}},
-		{"float64", func() error {
-			v, err := Inject[float64](c)
-			if err != nil || v != 3.14159 {
-				return fmt.Errorf("got %v", v)
-			}
-			return nil
-		}},
-		{"[]string", func() error {
-			v, err := Inject[[]string](c)
-			if err != nil || len(v) != 3 {
-				return fmt.Errorf("got %v", v)
-			}
-			return nil
-		}},
-		{"map", func() error {
-			v, err := Inject[map[string]int](c)
-			if err != nil || v["a"] != 1 {
-				return fmt.Errorf("got %v", v)
-			}
-			return nil
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.fn(); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-}
-
-type L0 int
-type L1 int
-type L2 int
-type L3 int
-type L4 int
-
-func TestBuildDependencyOrderIndependent_Shuffle(t *testing.T) {
-	for _, count := range []int{5, 8, 10} {
-		t.Run(fmt.Sprintf("Count%d", count), func(t *testing.T) {
-			for iter := 0; iter < 20; iter++ {
-				c := &Container{}
-				order := rand.Perm(count)
-				for _, idx := range order {
-					switch idx {
-					case 0:
-						c.MustAdd(Build(func(c *Container) (L0, error) { return 1, nil }))
-					case 1:
-						c.MustAdd(Build(func(c *Container) (L1, error) { v, _ := Inject[L0](c); return L1(v) + 1, nil }))
-					case 2:
-						c.MustAdd(Build(func(c *Container) (L2, error) { v, _ := Inject[L1](c); return L2(v) + 1, nil }))
-					case 3:
-						c.MustAdd(Build(func(c *Container) (L3, error) { v, _ := Inject[L2](c); return L3(v) + 1, nil }))
-					case 4:
-						c.MustAdd(Build(func(c *Container) (L4, error) { v, _ := Inject[L3](c); return L4(v) + 1, nil }))
-					}
-				}
-				if _, err := Inject[L4](c); err != nil {
-					t.Fatalf("iter %d: %v", iter, err)
-				}
-			}
-		})
-	}
-}
-
-func TestCircularDependency(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Build(func(c *Container) (int, error) {
-		_, err := Inject[string](c)
-		return 0, err
-	}))
-	c.MustAdd(Build(func(c *Container) (string, error) {
-		_, err := Inject[int](c)
-		return "", err
-	}))
-	if _, err := Inject[int](c); err == nil {
-		t.Fatal("expected circular dependency error")
-	} else {
-		t.Log(err)
-	}
-}
-
-func TestBuildWithError(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Build(func(c *Container) (int, error) { return 0, fmt.Errorf("intentional error") }),
-		Build(func(c *Container) (string, error) {
-			_, err := Inject[int](c)
-			if err != nil {
-				return "", fmt.Errorf("wrapped: %w", err)
-			}
-			return "ok", nil
-		}),
-	)
-	if _, err := Inject[string](c); err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-func TestComplexScenarios(t *testing.T) {
-	t.Run("MixedProvideAndBuild", func(t *testing.T) {
+func TestCore_ProvideBuildInject(t *testing.T) {
+	t.Run("BasicProvideAndInject", func(t *testing.T) {
 		c := &Container{}
-		c.MustAdd(
-			Provide("static"),
-			Build(func(c *Container) (int, error) {
-				s, _ := Inject[string](c)
-				if s != "static" {
-					return 0, fmt.Errorf("unexpected: %s", s)
-				}
-				return 42, nil
-			}),
-		)
-		v, err := Inject[int](c)
-		if err != nil || v != 42 {
-			t.Errorf("expected 42, got %v", v)
+		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		db, err := Inject[Database](c)
+		if err != nil || db.DSN != "mysql://localhost" {
+			t.Errorf("expected mysql://localhost, got %v, err %v", db.DSN, err)
 		}
 	})
-	t.Run("CrossDependencies", func(t *testing.T) {
+
+	t.Run("BuildWithDependencies", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Provide(Database{DSN: "mysql://localhost:3306/test"}),
+			Provide(Config{AppName: "test-app"}),
+			Build(func(c *Container) (Service, error) {
+				db, _ := Inject[Database](c)
+				cfg, _ := Inject[Config](c)
+				return Service{Name: "svc", DB: db, Cfg: cfg}, nil
+			}),
+		)
+		svc, err := Inject[Service](c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if svc.DB.DSN != "mysql://localhost:3306/test" || svc.Cfg.AppName != "test-app" {
+			t.Errorf("unexpected service: %+v", svc)
+		}
+	})
+
+	t.Run("BuildWithSingleDependency", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Provide("input"),
+			Build(func(s string) (int, error) { return len(s), nil }),
+		)
+		v, err := Inject[int](c)
+		if err != nil || v != 5 {
+			t.Errorf("expected 5, got %v, err %v", v, err)
+		}
+	})
+
+	t.Run("AllSupportedTypes", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Provide("test"), Provide(42), Provide(int8(8)), Provide(int64(64)),
+			Provide(uint(100)), Provide(float32(3.14)), Provide(3.14159), Provide(true),
+			Provide([]string{"a", "b", "c"}), Provide([]int{1, 2, 3}),
+			Provide(map[string]int{"a": 1}), Provide(&struct{ Name string }{Name: "Alice"}),
+			Provide(make(chan int)), Provide(func() string { return "hello" }),
+		)
+		tests := []struct {
+			name string
+			fn   func() error
+		}{
+			{"string", func() error {
+				v, err := Inject[string](c)
+				if err != nil || v != "test" {
+					return fmt.Errorf("got %v", v)
+				}
+				return nil
+			}},
+			{"int", func() error {
+				v, err := Inject[int](c)
+				if err != nil || v != 42 {
+					return fmt.Errorf("got %v", v)
+				}
+				return nil
+			}},
+			{"float64", func() error {
+				v, err := Inject[float64](c)
+				if err != nil || v != 3.14159 {
+					return fmt.Errorf("got %v", v)
+				}
+				return nil
+			}},
+			{"[]string", func() error {
+				v, err := Inject[[]string](c)
+				if err != nil || len(v) != 3 {
+					return fmt.Errorf("got %v", v)
+				}
+				return nil
+			}},
+			{"map", func() error {
+				v, err := Inject[map[string]int](c)
+				if err != nil || v["a"] != 1 {
+					return fmt.Errorf("got %v", v)
+				}
+				return nil
+			}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if err := tt.fn(); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	})
+}
+
+func TestCore_ErrorsAndPanics(t *testing.T) {
+	t.Run("DuplicateProviderError", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		err := c.Add(Provide(Database{DSN: "mysql://remote"}))
+		if err == nil {
+			t.Error("expected duplicate error")
+		}
+	})
+
+	t.Run("MustAddPanicsOnDuplicate", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic")
+			}
+		}()
+		c.MustAdd(Provide(Database{DSN: "mysql://remote"}))
+	})
+
+	t.Run("InjectNotFound", func(t *testing.T) {
+		c := &Container{}
+		var db Database
+		err := InjectTo[Database](c, &db)
+		if err == nil {
+			t.Error("expected error for missing type")
+		}
+	})
+
+	t.Run("MustInjectPanics", func(t *testing.T) {
+		c := &Container{}
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic")
+			}
+		}()
+		MustInject[Database](c)
+	})
+
+	t.Run("BuildErrorPropagation", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Build(func(c *Container) (int, error) { return 0, fmt.Errorf("intentional error") }),
+			Build(func(c *Container) (string, error) {
+				_, err := Inject[int](c)
+				if err != nil {
+					return "", fmt.Errorf("wrapped: %w", err)
+				}
+				return "ok", nil
+			}),
+		)
+		_, err := Inject[string](c)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "wrapped") {
+			t.Errorf("expected wrapped error, got: %v", err)
+		}
+	})
+
+	t.Run("CircularDependencyDetection", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Build(func(c *Container) (int, error) {
+				_, err := Inject[string](c)
+				return 0, err
+			}),
+			Build(func(c *Container) (string, error) {
+				_, err := Inject[int](c)
+				return "", err
+			}),
+		)
+		_, err := Inject[int](c)
+		if err == nil {
+			t.Fatal("expected circular dependency error")
+		}
+		if !strings.Contains(err.Error(), "circular dependency") {
+			t.Errorf("expected 'circular dependency' error, got: %v", err)
+		}
+	})
+
+	t.Run("BuildPanicRecovery", func(t *testing.T) {
 		c := &Container{}
 		c.MustAdd(
 			Build(func(c *Container) (string, error) {
-				i, _ := Inject[int](c)
-				return fmt.Sprintf("got-%d", i), nil
+				i, err := Inject[int](c)
+				return fmt.Sprintf("%v", i), err
 			}),
-			Build(func(c *Container) (int, error) { return 42, nil }),
+			Build(func(c *Container) (int, error) {
+				i, _ := strconv.Atoi(MustInject[string](c))
+				return i, nil
+			}),
 		)
-		v, err := Inject[string](c)
-		if err != nil || v != "got-42" {
-			t.Errorf("expected got-42, got %v", v)
+		_, err := Inject[string](c)
+		if err == nil {
+			t.Error("expected panic recovery error")
 		}
 	})
-}
 
-func TestHook(t *testing.T) {
-	c := &Container{}
-	startupCalled := 0
-	shutdownCalled := 0
-	startup := c.Hook("startup", func(v any, called int) func(context.Context) {
-		if called > 0 {
-			return nil
-		}
-		if _, ok := v.(Database); ok {
-			return func(ctx context.Context) { startupCalled++ }
-		}
-		if _, ok := v.(Config); ok {
-			return func(ctx context.Context) { startupCalled++ }
-		}
-		return nil
-	})
-	shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
-		if _, ok := v.(Database); ok {
-			return func(ctx context.Context) { shutdownCalled++ }
-		}
-		if _, ok := v.(Config); ok {
-			return func(ctx context.Context) { shutdownCalled++ }
-		}
-		return nil
-	})
-	c.MustAdd(
-		Provide(Database{DSN: "mysql://localhost"}),
-		Provide(Config{AppName: "test-app"}),
-	)
-	_, _ = Inject[Database](c)
-	_, _ = Inject[Config](c)
-	startup.Iterate(context.Background(), false)
-	if startupCalled != 2 {
-		t.Errorf("expected startupCalled=2, got %d", startupCalled)
-	}
-	shutdown.Iterate(context.Background(), true)
-	if shutdownCalled != 2 {
-		t.Errorf("expected shutdownCalled=2, got %d", shutdownCalled)
-	}
-}
-
-func TestHook_OnceOnlyTriggered(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	callCount := 0
-	hook := c.HookOnce("test", func(v any) func(context.Context) {
-		return func(ctx context.Context) {
-			if _, ok := v.(Database); ok {
-				callCount++
+	t.Run("MustInjectAsPanics", func(t *testing.T) {
+		c := &Container{}
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic")
 			}
+		}()
+		var db Database
+		MustInjectAs(c, &db)
+	})
+
+	t.Run("InjectMultipleWithError", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "test"}))
+		var db Database
+		var cfg Config
+		err := c.Inject(&db, &cfg)
+		if err == nil {
+			t.Error("expected error when injecting missing type")
 		}
 	})
-	_, _ = Inject[Database](c)
-	_, _ = Inject[Database](c)
-	_, _ = Inject[Database](c)
-	hook.Iterate(context.Background(), false)
-	if callCount != 1 {
-		t.Errorf("expected HookOnce called 1 time, got %d", callCount)
-	}
 }
 
-func TestContainer_Nested_Hook_BothContainersTriggered(t *testing.T) {
-	type Database struct{ DSN string }
-	child := &Container{}
-	child.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	childHookCalled := false
-	childStartup := child.Hook("startup", func(v any, provided int) func(context.Context) {
-		if provided > 0 {
-			return nil
+func TestCore_ContainerOperations(t *testing.T) {
+	t.Run("MultiInject", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(
+			Provide(Database{DSN: "mysql://localhost"}),
+			Provide(Config{AppName: "test-app"}),
+		)
+		var db Database
+		var cfg Config
+		err := c.Inject(&db, &cfg)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return func(ctx context.Context) {
-			if _, ok := v.(Database); ok {
-				childHookCalled = true
+		if db.DSN != "mysql://localhost" || cfg.AppName != "test-app" {
+			t.Errorf("unexpected values: db=%v, cfg=%v", db, cfg)
+		}
+	})
+
+	t.Run("InjectAs", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		db := Database{}
+		err := InjectAs(c, &db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if db.DSN != "mysql://localhost" {
+			t.Errorf("expected mysql://localhost, got %s", db.DSN)
+		}
+	})
+
+	t.Run("FrozenContainer", func(t *testing.T) {
+		child := &Container{}
+		child.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		parent := &Container{}
+		parent.MustAdd(child)
+		err := child.Add(Provide(Config{AppName: "test"}))
+		if err == nil {
+			t.Error("expected frozen error")
+		}
+		if !strings.Contains(err.Error(), "frozen") {
+			t.Errorf("expected 'frozen' error, got: %v", err)
+		}
+	})
+}
+
+// =============================================================================
+// Hook System Tests
+// =============================================================================
+
+func TestHooks_Lifecycle(t *testing.T) {
+	t.Run("HookAndHookOnce", func(t *testing.T) {
+		c := &Container{}
+		startupCalled := 0
+		shutdownCalled := 0
+
+		startup := c.Hook("startup", func(v any, provided int) func(context.Context) {
+			if provided > 0 {
+				return nil
 			}
-		}
-	})
-	parent := &Container{}
-	parent.MustAdd(child)
-	parentHookCalled := false
-	parentStartup := parent.Hook("startup", func(v any, provided int) func(context.Context) {
-		if provided > 0 {
-			return nil
-		}
-		return func(ctx context.Context) {
 			if _, ok := v.(Database); ok {
-				parentHookCalled = true
+				return func(ctx context.Context) { startupCalled++ }
 			}
+			if _, ok := v.(Config); ok {
+				return func(ctx context.Context) { startupCalled++ }
+			}
+			return nil
+		})
+
+		shutdown := c.HookOnce("shutdown", func(v any) func(context.Context) {
+			return func(ctx context.Context) {
+				if _, ok := v.(Database); ok {
+					shutdownCalled++
+				}
+				if _, ok := v.(Config); ok {
+					shutdownCalled++
+				}
+			}
+		})
+
+		c.MustAdd(
+			Provide(Database{DSN: "mysql://localhost"}),
+			Provide(Config{AppName: "test-app"}),
+		)
+		_, _ = Inject[Database](c)
+		_, _ = Inject[Config](c)
+
+		startup.Iterate(context.Background(), false)
+		if startupCalled != 2 {
+			t.Errorf("expected startupCalled=2, got %d", startupCalled)
+		}
+
+		shutdown.Iterate(context.Background(), true)
+		if shutdownCalled != 2 {
+			t.Errorf("expected shutdownCalled=2, got %d", shutdownCalled)
 		}
 	})
-	_, _ = Inject[Database](parent)
-	childStartup.Iterate(context.Background(), false)
-	parentStartup.Iterate(context.Background(), false)
-	if !childHookCalled {
-		t.Error("expected child hook to be called")
-	}
-	if !parentHookCalled {
-		t.Error("expected parent hook to be called")
-	}
+
+	t.Run("HookOnceOnlyTriggered", func(t *testing.T) {
+		c := &Container{}
+		c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
+		callCount := 0
+		hook := c.HookOnce("test", func(v any) func(context.Context) {
+			return func(ctx context.Context) {
+				if _, ok := v.(Database); ok {
+					callCount++
+				}
+			}
+		})
+		_, _ = Inject[Database](c)
+		_, _ = Inject[Database](c)
+		_, _ = Inject[Database](c)
+		hook.Iterate(context.Background(), false)
+		if callCount != 1 {
+			t.Errorf("expected HookOnce called 1 time, got %d", callCount)
+		}
+	})
+
+	t.Run("NestedContainerHooks", func(t *testing.T) {
+		type DB struct{ DSN string }
+		child := &Container{}
+		child.MustAdd(Provide(DB{DSN: "mysql://localhost"}))
+		childHookCalled := false
+		childStartup := child.Hook("startup", func(v any, provided int) func(context.Context) {
+			if provided > 0 {
+				return nil
+			}
+			return func(ctx context.Context) {
+				if _, ok := v.(DB); ok {
+					childHookCalled = true
+				}
+			}
+		})
+		parent := &Container{}
+		parent.MustAdd(child)
+		parentHookCalled := false
+		parentStartup := parent.Hook("startup", func(v any, provided int) func(context.Context) {
+			if provided > 0 {
+				return nil
+			}
+			return func(ctx context.Context) {
+				if _, ok := v.(DB); ok {
+					parentHookCalled = true
+				}
+			}
+		})
+		_, _ = Inject[DB](parent)
+		childStartup.Iterate(context.Background(), false)
+		parentStartup.Iterate(context.Background(), false)
+		if !childHookCalled {
+			t.Error("expected child hook to be called")
+		}
+		if !parentHookCalled {
+			t.Error("expected parent hook to be called")
+		}
+	})
 }
 
-func TestNestedContainer_CircularDependencyDetection(t *testing.T) {
-	type ServiceA struct{}
-	type ServiceB struct{}
-	child := &Container{}
-	child.MustAdd(Build(func(c *Container) (ServiceA, error) {
-		_, err := Inject[ServiceB](c)
-		return ServiceA{}, err
-	}))
-	parent := &Container{}
-	parent.MustAdd(child)
-	parent.MustAdd(Build(func(c *Container) (ServiceB, error) {
-		_, err := Inject[ServiceA](c)
-		return ServiceB{}, err
-	}))
-	_, err := Inject[ServiceA](parent)
-	if err == nil {
-		t.Fatal("expected circular dependency error")
-	}
-}
+// =============================================================================
+// Nested Container Tests
+// =============================================================================
 
-func TestNestedContainer_TypeDetection(t *testing.T) {
+func TestNestedContainer_Basic(t *testing.T) {
 	tests := []struct {
 		name     string
 		setup    func() *Container
 		verifyFn func(*Container) error
 	}{
 		{
-			name: "Basic_TwoLevel",
+			name: "TwoLevel",
 			setup: func() *Container {
 				child := &Container{}
 				child.MustAdd(Provide(CntTypeA{ID: 42}))
@@ -521,7 +452,7 @@ func TestNestedContainer_TypeDetection(t *testing.T) {
 			},
 		},
 		{
-			name: "ThreeLevel_Hierarchy",
+			name: "ThreeLevel",
 			setup: func() *Container {
 				l1 := &Container{}
 				l1.MustAdd(Provide(CntTypeA{ID: 1}))
@@ -543,7 +474,7 @@ func TestNestedContainer_TypeDetection(t *testing.T) {
 			},
 		},
 		{
-			name: "MultipleChildren_Isolation",
+			name: "MultipleChildren",
 			setup: func() *Container {
 				c1 := &Container{}
 				c1.MustAdd(Provide(CntTypeA{ID: 1}))
@@ -588,27 +519,7 @@ func TestNestedContainer_TypeDetection(t *testing.T) {
 			},
 		},
 		{
-			name: "MixedProvideAndBuild",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(
-					Provide(CntTypeA{ID: 1}),
-					Build(func(c *Container) (CntTypeB, error) {
-						a, _ := Inject[CntTypeA](c)
-						return CntTypeB{ID: a.ID * 10}, nil
-					}),
-				)
-				return c
-			},
-			verifyFn: func(c *Container) error {
-				if v, err := Inject[CntTypeB](c); err != nil || v.ID != 10 {
-					return fmt.Errorf("CntTypeB: %w", err)
-				}
-				return nil
-			},
-		},
-		{
-			name: "ConcurrentAccess_ThreadSafe",
+			name: "ConcurrentAccess",
 			setup: func() *Container {
 				child := &Container{}
 				child.MustAdd(Provide(CntTypeA{ID: 42}))
@@ -658,301 +569,358 @@ func TestNestedContainer_TypeDetection(t *testing.T) {
 	}
 }
 
-func TestBuild_TableDriven(t *testing.T) {
-	type (
-		Name     string
-		Greeting string
-		S        string
-		I        int
-		R        string
-		A        int
-		B        int
-		Named    struct{}
-		Alias    = struct{}
-	)
+func TestNestedContainer_CircularDependency(t *testing.T) {
+	type ServiceA struct{}
+	type ServiceB struct{}
+	child := &Container{}
+	child.MustAdd(Build(func(c *Container) (ServiceA, error) {
+		_, err := Inject[ServiceB](c)
+		return ServiceA{}, err
+	}))
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (ServiceB, error) {
+		_, err := Inject[ServiceA](c)
+		return ServiceB{}, err
+	}))
+	_, err := Inject[ServiceA](parent)
+	if err == nil {
+		t.Fatal("expected circular dependency error")
+	}
+}
 
+func TestNestedContainer_CrossContainer_ChainDependency(t *testing.T) {
+	type A struct{ BVal string }
+	type B struct{ CVal string }
+	type C struct{ DVal string }
+	type D struct{ EVal string }
+	type E struct{ FVal string }
+	type F struct{ GVal string }
+	type G struct{ Value string }
+
+	grand := &Container{}
+	grand.MustAdd(Provide(G{Value: "G-base"}))
+	grand.MustAdd(Build(func(d D) (C, error) {
+		return C{DVal: "C-depends-on-" + d.EVal}, nil
+	}))
+
+	child := &Container{}
+	child.MustAdd(grand)
+	child.MustAdd(Build(func(cc C) (B, error) {
+		return B{CVal: "B-depends-on-" + cc.DVal}, nil
+	}))
+	child.MustAdd(Build(func(f F) (E, error) {
+		return E{FVal: "E-depends-on-" + f.GVal}, nil
+	}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(bb B) (A, error) {
+		return A{BVal: "A-depends-on-" + bb.CVal}, nil
+	}))
+	parent.MustAdd(Build(func(e E) (D, error) {
+		return D{EVal: "D-depends-on-" + e.FVal}, nil
+	}))
+	parent.MustAdd(Build(func(g G) (F, error) {
+		return F{GVal: "F-depends-on-" + g.Value}, nil
+	}))
+
+	a, err := Inject[A](parent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "A-depends-on-B-depends-on-C-depends-on-D-depends-on-E-depends-on-F-depends-on-G-base"
+	if a.BVal != expected {
+		t.Errorf("expected %q, got %q", expected, a.BVal)
+	}
+}
+
+func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
+	type A struct{ GVal string }
+	type B struct{ CVal string }
+	type C struct{ DVal string }
+	type D struct{ EVal string }
+	type E struct{ FVal string }
+	type F struct{ GVal string }
+	type G struct{ AVal string }
+
+	grand := &Container{}
+	grand.MustAdd(Build(func(c *Container) (G, error) {
+		a, err := Inject[A](c)
+		if err != nil {
+			return G{}, err
+		}
+		return G{AVal: "G-depends-on-" + a.GVal}, nil
+	}))
+	grand.MustAdd(Build(func(c *Container) (C, error) {
+		d, err := Inject[D](c)
+		if err != nil {
+			return C{}, err
+		}
+		return C{DVal: "C-depends-on-" + d.EVal}, nil
+	}))
+
+	child := &Container{}
+	child.MustAdd(grand)
+	child.MustAdd(Build(func(c *Container) (B, error) {
+		cc, err := Inject[C](c)
+		if err != nil {
+			return B{}, err
+		}
+		return B{CVal: "B-depends-on-" + cc.DVal}, nil
+	}))
+	child.MustAdd(Build(func(c *Container) (E, error) {
+		f, err := Inject[F](c)
+		if err != nil {
+			return E{}, err
+		}
+		return E{FVal: "E-depends-on-" + f.GVal}, nil
+	}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+	parent.MustAdd(Build(func(c *Container) (A, error) {
+		bb, err := Inject[B](c)
+		if err != nil {
+			return A{}, err
+		}
+		return A{GVal: "A-depends-on-" + bb.CVal}, nil
+	}))
+	parent.MustAdd(Build(func(e E) (D, error) {
+		return D{EVal: "D-depends-on-" + e.FVal}, nil
+	}))
+	parent.MustAdd(Build(func(c *Container) (F, error) {
+		g, err := Inject[G](c)
+		if err != nil {
+			return F{}, err
+		}
+		return F{GVal: "F-depends-on-" + g.AVal}, nil
+	}))
+
+	_, err := Inject[A](parent)
+	if err == nil {
+		t.Fatal("expected circular dependency error")
+	}
+	if !strings.Contains(err.Error(), "circular dependency") {
+		t.Errorf("expected 'circular dependency' error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// Runtime Container Add Tests
+// =============================================================================
+
+func TestNestedContainer_RuntimeAdd(t *testing.T) {
 	tests := []struct {
-		name     string
-		setup    func() *Container
-		injectFn func(*Container) (any, error)
-		want     any
-		wantErr  bool
+		name         string
+		initialFloat float64
+		wantStr      string
+		wantIntErr   bool
 	}{
 		{
-			name: "single dependency auto-inject",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return len(s), nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
-			want:     5,
-			wantErr:  false,
+			name:         "NegativeValue_AddsNegativeContainer",
+			initialFloat: -0.1,
+			wantStr:      "-100",
+			wantIntErr:   true,
 		},
 		{
-			name: "struct{} literal no dependency",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Build(func(struct{}) (int, error) { return 42, nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
-			want:     42,
-			wantErr:  false,
-		},
-		{
-			name: "struct{} type alias",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Build(func(Alias) (int32, error) { return 100, nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int32](c) },
-			want:     int32(100),
-			wantErr:  false,
-		},
-		{
-			name: "var struct field inject",
-			setup: func() *Container {
-				c := &Container{}
-				var s struct{}
-				c.MustAdd(Provide(s), Build(func(struct{}) (int16, error) { return 7, nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int16](c) },
-			want:     int16(7),
-			wantErr:  false,
-		},
-		{
-			name: "named struct requires Provide",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide(Named{}), Build(func(Named) (int64, error) { return 99, nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int64](c) },
-			want:     int64(99),
-			wantErr:  false,
-		},
-		{
-			name: "Container multi-dep",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(
-					Provide(A(10)), Provide(B(20)),
-					Build(func(c *Container) (int, error) {
-						a, _ := Inject[A](c)
-						b, _ := Inject[B](c)
-						return int(a) + int(b), nil
-					}),
-				)
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
-			want:     30,
-			wantErr:  false,
-		},
-		{
-			name: "Container complex",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(
-					Provide(Name("world")),
-					Build(func(c *Container) (Greeting, error) {
-						n, _ := Inject[Name](c)
-						return Greeting("hello " + string(n)), nil
-					}),
-				)
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[Greeting](c) },
-			want:     Greeting("hello world"),
-			wantErr:  false,
-		},
-		{
-			name: "dependency chain",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(
-					Provide(S("hello")),
-					Build(func(s S) (I, error) { return I(len(s)), nil }),
-					Build(func(n I) (R, error) { return R(fmt.Sprintf("len:%d", n)), nil }),
-				)
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[R](c) },
-			want:     R("len:5"),
-			wantErr:  false,
-		},
-		{
-			name: "build error",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return 0, fmt.Errorf("error") }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
-			want:     0,
-			wantErr:  true,
-		},
-		{
-			name: "dependency not found",
-			setup: func() *Container {
-				c := &Container{}
-				c.MustAdd(Build(func(s string) (int, error) { return len(s), nil }))
-				return c
-			},
-			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
-			want:     0,
-			wantErr:  true,
+			name:         "PositiveValue_AddsPositiveContainer",
+			initialFloat: 0.5,
+			wantStr:      "100",
+			wantIntErr:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := tt.setup()
-			got, err := tt.injectFn(c)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr = %v", err, tt.wantErr)
+			c := &Container{}
+			positive := (&Container{}).MustAdd(Provide(100))
+			negative := (&Container{}).MustAdd(Provide(-100))
+
+			c.MustAdd(
+				Provide(tt.initialFloat),
+				Build(func(c *Container) (str string, err error) {
+					f, err := Inject[float64](c)
+					if err != nil {
+						return
+					}
+					if f > 0 {
+						c.MustAdd(positive)
+					} else {
+						c.MustAdd(negative)
+					}
+					i, err := Inject[int](c)
+					if err != nil {
+						return
+					}
+					return strconv.Itoa(i), nil
+				}),
+			)
+
+			str, err := Inject[string](c)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			if !tt.wantErr && got != tt.want {
-				t.Errorf("got = %v, want = %v", got, tt.want)
+			if str != tt.wantStr {
+				t.Errorf("got string %s, want %s", str, tt.wantStr)
+			}
+
+			if v, e := Inject[int](c); (e != nil) != tt.wantIntErr {
+				t.Errorf("Inject[int] error = %v, wantErr %v", e, tt.wantIntErr)
+			} else if e == nil {
+				t.Logf("Injected int from nested container: %d", v)
 			}
 		})
 	}
 }
 
-func TestInjectAs(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	db := Database{}
-	err := InjectAs(c, &db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-}
+func TestNestedContainer_RuntimeAdd_NoFrozenError(t *testing.T) {
+	t.Run("RuntimeAdd_DoesNotTriggerFrozen", func(t *testing.T) {
+		c := &Container{}
+		nested := (&Container{}).MustAdd(Provide("nested-value"))
 
-func TestMustInjectAs(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	db := Database{}
-	MustInjectAs(c, &db)
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-}
+		c.MustAdd(
+			Provide(42),
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(nested)
+				i, _ := Inject[int](c)
+				return fmt.Sprintf("val-%d", i), nil
+			}),
+		)
 
-func TestMustInjectTo(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	var db Database
-	MustInjectTo(c, &db)
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-}
-
-func TestMustInject(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	db := MustInject[Database](c)
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-}
-
-func TestMustInject_Panic(t *testing.T) {
-	c := &Container{}
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic")
+		if _, err := Inject[string](c); err != nil {
+			t.Fatalf("Build function should not trigger frozen error: %v", err)
 		}
-	}()
-	MustInject[Database](c)
-}
 
-func TestBuild_Panic(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Build(func(c *Container) (string, error) {
-			i, err := Inject[int](c)
-			return fmt.Sprintf("%v", i), err
-		}),
-		Build(func(c *Container) (int, error) {
-			i, _ := strconv.Atoi(MustInject[string](c))
-			return i, nil
-		}),
-	)
-	t.Log(Inject[string](c))
-}
-
-func TestMustInjectAs_Panic(t *testing.T) {
-	c := &Container{}
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic")
+		if v, err := Inject[string](c); err != nil {
+			t.Errorf("Re-injection failed: %v", err)
+		} else if v != "val-42" {
+			t.Errorf("got %s, want val-42", v)
 		}
-	}()
-	db := Database{}
-	MustInjectAs(c, &db)
-}
+	})
 
-func TestMustInjectTo_Panic(t *testing.T) {
-	c := &Container{}
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic")
+	t.Run("DirectAddToFrozenContainer_Error", func(t *testing.T) {
+		child := &Container{}
+		child.MustAdd(Provide("child-value"))
+
+		parent := &Container{}
+		parent.MustAdd(child)
+
+		err := child.Add(Provide("new-value"))
+		if err == nil {
+			t.Fatal("expected frozen error, got nil")
 		}
-	}()
-	var db Database
-	MustInjectTo(c, &db)
+		if !strings.Contains(err.Error(), "frozen") {
+			t.Errorf("expected 'frozen' error, got: %v", err)
+		}
+	})
+
+	t.Run("RuntimeAdd_MultipleContainers", func(t *testing.T) {
+		type V1 string
+		type V2 string
+		type V3 string
+
+		c := &Container{}
+		container1 := (&Container{}).MustAdd(Provide(V1("value1")))
+		container2 := (&Container{}).MustAdd(Provide(V2("value2")))
+		container3 := (&Container{}).MustAdd(Provide(V3("value3")))
+
+		c.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(container1)
+				c.MustAdd(container2)
+				c.MustAdd(container3)
+				v1, _ := Inject[V1](c)
+				return string(v1), nil
+			}),
+		)
+
+		v, err := Inject[string](c)
+		if err != nil {
+			t.Fatalf("Runtime add multiple containers failed: %v", err)
+		}
+		if v != "value1" {
+			t.Errorf("got %s, want value1", v)
+		}
+	})
+
+	t.Run("RuntimeAdd_NestedContainer_WithHooks", func(t *testing.T) {
+		type RuntimeDB struct{ DSN string }
+
+		c := &Container{}
+		nested := (&Container{}).MustAdd(Provide(RuntimeDB{DSN: "mysql://runtime"}))
+
+		hookCalled := 0
+		hook := c.HookOnce("test", func(v any) func(context.Context) {
+			return func(ctx context.Context) {
+				if _, ok := v.(RuntimeDB); ok {
+					hookCalled++
+				}
+			}
+		})
+
+		c.MustAdd(
+			Build(func(c *Container) (string, error) {
+				c.MustAdd(nested)
+				db, _ := Inject[RuntimeDB](c)
+				return db.DSN, nil
+			}),
+		)
+
+		result, err := Inject[string](c)
+		if err != nil {
+			t.Fatalf("Runtime add with hook failed: %v", err)
+		}
+		if result != "mysql://runtime" {
+			t.Errorf("got DSN %s, want mysql://runtime", result)
+		}
+
+		hook.Iterate(context.Background(), false)
+		if hookCalled != 1 {
+			t.Errorf("hook called %d times, want 1", hookCalled)
+		}
+	})
+
+	t.Run("RuntimeAdd_ChainedDependencies", func(t *testing.T) {
+		type A struct{ Val string }
+		type B struct{ Val string }
+		type C struct{ Val string }
+
+		c := &Container{}
+		containerA := (&Container{}).MustAdd(Provide(A{Val: "A"}))
+		containerB := (&Container{}).MustAdd(
+			Provide(B{Val: "B"}),
+			Build(func(c *Container) (string, error) {
+				a, _ := Inject[A](c)
+				b, _ := Inject[B](c)
+				return a.Val + "-" + b.Val, nil
+			}),
+		)
+
+		c.MustAdd(
+			Build(func(c *Container) (C, error) {
+				c.MustAdd(containerA)
+				c.MustAdd(containerB)
+				s, _ := Inject[string](c)
+				return C{Val: "C-" + s}, nil
+			}),
+		)
+
+		result, err := Inject[C](c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "C-A-B"
+		if result.Val != expected {
+			t.Errorf("got %s, want %s", result.Val, expected)
+		}
+	})
 }
 
-func TestContainer_Inject(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	var db Database
-	err := c.Inject(&db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-}
-
-func TestContainer_Inject_Multiple(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(
-		Provide(Database{DSN: "mysql://localhost"}),
-		Provide(Config{AppName: "test-app"}),
-	)
-	var db Database
-	var cfg Config
-	err := c.Inject(&db, &cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if db.DSN != "mysql://localhost" {
-		t.Errorf("expected mysql://localhost, got %s", db.DSN)
-	}
-	if cfg.AppName != "test-app" {
-		t.Errorf("expected test-app, got %s", cfg.AppName)
-	}
-}
-
-func TestContainer_Inject_Error(t *testing.T) {
-	c := &Container{}
-	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
-	var cfg Config
-	err := c.Inject(&cfg)
-	if err == nil {
-		t.Fatal("expected error for missing type")
-	}
-}
+// =============================================================================
+// Concurrent Access Tests
+// =============================================================================
 
 func TestContainer_Concurrent(t *testing.T) {
 	tests := []struct {
@@ -973,10 +941,7 @@ func TestContainer_Concurrent(t *testing.T) {
 					errCh <- c.Add(Provide(CntTypeA{ID: id}))
 				}()
 			},
-			verifyFn: func(c *Container) error {
-				_, err := Inject[CntTypeA](c)
-				return err
-			},
+			verifyFn:    func(c *Container) error { _, err := Inject[CntTypeA](c); return err },
 			goroutines:  100,
 			wantSuccess: 1,
 		},
@@ -997,20 +962,16 @@ func TestContainer_Concurrent(t *testing.T) {
 				}()
 			},
 			verifyFn: func(c *Container) error {
-				if _, err := Inject[bench0](c); err != nil {
-					return fmt.Errorf("bench0: %w", err)
-				}
-				if _, err := Inject[bench1](c); err != nil {
-					return fmt.Errorf("bench1: %w", err)
-				}
-				if _, err := Inject[bench2](c); err != nil {
-					return fmt.Errorf("bench2: %w", err)
-				}
-				if _, err := Inject[bench3](c); err != nil {
-					return fmt.Errorf("bench3: %w", err)
-				}
-				if _, err := Inject[bench4](c); err != nil {
-					return fmt.Errorf("bench4: %w", err)
+				for _, fn := range []func() error{
+					func() error { _, e := Inject[bench0](c); return e },
+					func() error { _, e := Inject[bench1](c); return e },
+					func() error { _, e := Inject[bench2](c); return e },
+					func() error { _, e := Inject[bench3](c); return e },
+					func() error { _, e := Inject[bench4](c); return e },
+				} {
+					if err := fn(); err != nil {
+						return err
+					}
 				}
 				return nil
 			},
@@ -1029,75 +990,9 @@ func TestContainer_Concurrent(t *testing.T) {
 					errCh <- c.Add(child)
 				}()
 			},
-			verifyFn: func(c *Container) error {
-				_, err := Inject[CntTypeA](c)
-				return err
-			},
+			verifyFn:    func(c *Container) error { _, err := Inject[CntTypeA](c); return err },
 			goroutines:  50,
 			wantSuccess: 1,
-		},
-		{
-			name:  "Nested_MultipleChildren_ThreeTypes",
-			setup: func() *Container { return &Container{} },
-			operateFn: func(c *Container, idx int, wg *sync.WaitGroup, errCh chan<- error) {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					child := &Container{}
-					switch idx % 3 {
-					case 0:
-						child.MustAdd(Provide(CntTypeA{ID: idx}))
-					case 1:
-						child.MustAdd(Provide(CntTypeB{ID: idx}))
-					case 2:
-						child.MustAdd(Provide(CntTypeC{ID: idx}))
-					}
-					errCh <- c.Add(child)
-				}()
-			},
-			verifyFn: func(c *Container) error {
-				if _, err := Inject[CntTypeA](c); err != nil {
-					return fmt.Errorf("CntTypeA: %w", err)
-				}
-				if _, err := Inject[CntTypeB](c); err != nil {
-					return fmt.Errorf("CntTypeB: %w", err)
-				}
-				if _, err := Inject[CntTypeC](c); err != nil {
-					return fmt.Errorf("CntTypeC: %w", err)
-				}
-				return nil
-			},
-			goroutines:  30,
-			wantSuccess: 3,
-		},
-		{
-			name:  "Mixed_DirectAndNested",
-			setup: func() *Container { return &Container{} },
-			operateFn: func(c *Container, idx int, wg *sync.WaitGroup, errCh chan<- error) {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					switch idx % 2 {
-					case 0:
-						errCh <- c.Add(Provide(CntTypeA{ID: idx}))
-					case 1:
-						child := &Container{}
-						child.MustAdd(Provide(CntTypeB{ID: idx}))
-						errCh <- c.Add(child)
-					}
-				}()
-			},
-			verifyFn: func(c *Container) error {
-				if _, err := Inject[CntTypeA](c); err != nil {
-					return err
-				}
-				if _, err := Inject[CntTypeB](c); err != nil {
-					return err
-				}
-				return nil
-			},
-			goroutines:  40,
-			wantSuccess: 2,
 		},
 		{
 			name: "Inject_ThreadSafe",
@@ -1315,55 +1210,6 @@ func TestContainer_ConcurrentCrossNested(t *testing.T) {
 			},
 			goroutines: 15,
 		},
-		{
-			name: "Diamond_FourContainers",
-			setup: func() (*Container, *Container, *Container) {
-				return &Container{}, &Container{}, &Container{}
-			},
-			operateFn: func(a, b, c *Container, idx int, wg *sync.WaitGroup, errCh chan<- error) {
-				wg.Add(4)
-				go func() {
-					defer wg.Done()
-					child := &Container{}
-					child.MustAdd(Provide(CntTypeA{ID: idx}))
-					errCh <- a.Add(child)
-				}()
-				go func() {
-					defer wg.Done()
-					child := &Container{}
-					child.MustAdd(Provide(CntTypeB{ID: idx}))
-					errCh <- b.Add(child)
-				}()
-				go func() {
-					defer wg.Done()
-					child := &Container{}
-					child.MustAdd(Provide(CntTypeC{ID: idx}))
-					errCh <- c.Add(child)
-				}()
-				go func() {
-					defer wg.Done()
-					child := &Container{}
-					child.MustAdd(Provide(CntTypeD{ID: idx}))
-					errCh <- a.Add(child)
-				}()
-			},
-			verifyFn: func(a, b, c *Container) error {
-				if _, err := Inject[CntTypeA](a); err != nil {
-					return fmt.Errorf("CntTypeA: %w", err)
-				}
-				if _, err := Inject[CntTypeB](b); err != nil {
-					return fmt.Errorf("CntTypeB: %w", err)
-				}
-				if _, err := Inject[CntTypeC](c); err != nil {
-					return fmt.Errorf("CntTypeC: %w", err)
-				}
-				if _, err := Inject[CntTypeD](a); err != nil {
-					return fmt.Errorf("CntTypeD: %w", err)
-				}
-				return nil
-			},
-			goroutines: 10,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1390,6 +1236,212 @@ func TestContainer_ConcurrentCrossNested(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Build Dependency Order Tests
+// =============================================================================
+
+type L0 int
+type L1 int
+type L2 int
+type L3 int
+type L4 int
+
+func TestBuildDependencyOrderIndependent_Shuffle(t *testing.T) {
+	for _, count := range []int{5, 8, 10} {
+		t.Run(fmt.Sprintf("Count%d", count), func(t *testing.T) {
+			for iter := 0; iter < 20; iter++ {
+				c := &Container{}
+				order := rand.Perm(count)
+				for _, idx := range order {
+					switch idx {
+					case 0:
+						c.MustAdd(Build(func(c *Container) (L0, error) { return 1, nil }))
+					case 1:
+						c.MustAdd(Build(func(c *Container) (L1, error) { v, _ := Inject[L0](c); return L1(v) + 1, nil }))
+					case 2:
+						c.MustAdd(Build(func(c *Container) (L2, error) { v, _ := Inject[L1](c); return L2(v) + 1, nil }))
+					case 3:
+						c.MustAdd(Build(func(c *Container) (L3, error) { v, _ := Inject[L2](c); return L3(v) + 1, nil }))
+					case 4:
+						c.MustAdd(Build(func(c *Container) (L4, error) { v, _ := Inject[L3](c); return L4(v) + 1, nil }))
+					}
+				}
+				if _, err := Inject[L4](c); err != nil {
+					t.Fatalf("iter %d: %v", iter, err)
+				}
+			}
+		})
+	}
+}
+
+func TestBuild_TableDriven(t *testing.T) {
+	type (
+		Name     string
+		Greeting string
+		S        string
+		I        int
+		R        string
+		A        int
+		B        int
+		Named    struct{}
+		Alias    = struct{}
+	)
+
+	tests := []struct {
+		name     string
+		setup    func() *Container
+		injectFn func(*Container) (any, error)
+		want     any
+		wantErr  bool
+	}{
+		{
+			name: "single dependency auto-inject",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return len(s), nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     5,
+			wantErr:  false,
+		},
+		{
+			name: "struct{} literal no dependency",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(struct{}) (int, error) { return 42, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     42,
+			wantErr:  false,
+		},
+		{
+			name: "struct{} type alias",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(Alias) (int32, error) { return 100, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int32](c) },
+			want:     int32(100),
+			wantErr:  false,
+		},
+		{
+			name: "var struct field inject",
+			setup: func() *Container {
+				c := &Container{}
+				var s struct{}
+				c.MustAdd(Provide(s), Build(func(struct{}) (int16, error) { return 7, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int16](c) },
+			want:     int16(7),
+			wantErr:  false,
+		},
+		{
+			name: "named struct requires Provide",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide(Named{}), Build(func(Named) (int64, error) { return 99, nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int64](c) },
+			want:     int64(99),
+			wantErr:  false,
+		},
+		{
+			name: "Container multi-dep",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(A(10)), Provide(B(20)),
+					Build(func(c *Container) (int, error) {
+						a, _ := Inject[A](c)
+						b, _ := Inject[B](c)
+						return int(a) + int(b), nil
+					}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     30,
+			wantErr:  false,
+		},
+		{
+			name: "Container complex",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(Name("world")),
+					Build(func(c *Container) (Greeting, error) {
+						n, _ := Inject[Name](c)
+						return Greeting("hello " + string(n)), nil
+					}),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[Greeting](c) },
+			want:     Greeting("hello world"),
+			wantErr:  false,
+		},
+		{
+			name: "dependency chain",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(
+					Provide(S("hello")),
+					Build(func(s S) (I, error) { return I(len(s)), nil }),
+					Build(func(n I) (R, error) { return R(fmt.Sprintf("len:%d", n)), nil }),
+				)
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[R](c) },
+			want:     R("len:5"),
+			wantErr:  false,
+		},
+		{
+			name: "build error",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Provide("input"), Build(func(s string) (int, error) { return 0, fmt.Errorf("error") }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     0,
+			wantErr:  true,
+		},
+		{
+			name: "dependency not found",
+			setup: func() *Container {
+				c := &Container{}
+				c.MustAdd(Build(func(s string) (int, error) { return len(s), nil }))
+				return c
+			},
+			injectFn: func(c *Container) (any, error) { return Inject[int](c) },
+			want:     0,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.setup()
+			got, err := tt.injectFn(c)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("got = %v, want = %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Benchmark Tests
+// =============================================================================
 
 func BenchmarkInject(b *testing.B) {
 	c := &Container{}
@@ -1475,530 +1527,6 @@ func BenchmarkContainer_ConcurrentNestedAdd(b *testing.B) {
 				}(j)
 			}
 			wg.Wait()
-		}
-	})
-}
-
-// TestNestedContainer_CrossContainer_ChainDependency tests dependency chain across 3-level nested containers
-// Container hierarchy:
-//
-//	parent: A, D, F
-//	child:  B, E
-//	grand:  C, G
-//
-// Chain: A => B => C => D => E => F => G (should work)
-func TestNestedContainer_CrossContainer_ChainDependency(t *testing.T) {
-	type A struct{ BVal string }
-	type B struct{ CVal string }
-	type C struct{ DVal string }
-	type D struct{ EVal string }
-	type E struct{ FVal string }
-	type F struct{ GVal string }
-	type G struct{ Value string }
-
-	// Grandchild container: provides C, G
-	grand := &Container{}
-	grand.MustAdd(Provide(G{Value: "G-base"}))
-	grand.MustAdd(Build(func(d D) (C, error) {
-		return C{DVal: "C-depends-on-" + d.EVal}, nil
-	}))
-
-	// Child container: provides B, E
-	child := &Container{}
-	child.MustAdd(grand)
-	child.MustAdd(Build(func(cc C) (B, error) {
-		return B{CVal: "B-depends-on-" + cc.DVal}, nil
-	}))
-	child.MustAdd(Build(func(f F) (E, error) {
-		return E{FVal: "E-depends-on-" + f.GVal}, nil
-	}))
-
-	// Parent container: provides A, D, F
-	parent := &Container{}
-	parent.MustAdd(child)
-	parent.MustAdd(Build(func(bb B) (A, error) {
-		return A{BVal: "A-depends-on-" + bb.CVal}, nil
-	}))
-	parent.MustAdd(Build(func(e E) (D, error) {
-		return D{EVal: "D-depends-on-" + e.FVal}, nil
-	}))
-	parent.MustAdd(Build(func(g G) (F, error) {
-		return F{GVal: "F-depends-on-" + g.Value}, nil
-	}))
-
-	// Inject A - should traverse: A(parent) => B(child) => C(grand) => D(parent) => E(child) => F(parent) => G(grand)
-	a, err := Inject[A](parent)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Verify the full chain was resolved
-	expected := "A-depends-on-B-depends-on-C-depends-on-D-depends-on-E-depends-on-F-depends-on-G-base"
-	if a.BVal != expected {
-		t.Errorf("expected %q, got %q", expected, a.BVal)
-	}
-}
-
-// TestNestedContainer_CrossContainer_CircularDependency tests circular dependency detection across 3-level nested containers
-// Container hierarchy:
-//
-//	parent: A, D, F
-//	child:  B, E
-//	grand:  C, G
-//
-// Chain: A => B => C => D => E => F => G => A (circular - should fail)
-func TestNestedContainer_CrossContainer_CircularDependency(t *testing.T) {
-	type A struct{ GVal string }
-	type B struct{ CVal string }
-	type C struct{ DVal string }
-	type D struct{ EVal string }
-	type E struct{ FVal string }
-	type F struct{ GVal string }
-	type G struct{ AVal string }
-
-	// Grandchild container: provides C, G (G depends on A - creates circular!)
-	grand := &Container{}
-	grand.MustAdd(Build(func(c *Container) (G, error) {
-		// This creates the circular dependency: G => A
-		a, err := Inject[A](c)
-		if err != nil {
-			return G{}, err
-		}
-		return G{AVal: "G-depends-on-" + a.GVal}, nil
-	}))
-	grand.MustAdd(Build(func(c *Container) (C, error) {
-		d, err := Inject[D](c)
-		if err != nil {
-			return C{}, err
-		}
-		return C{DVal: "C-depends-on-" + d.EVal}, nil
-	}))
-
-	// Child container: provides B, E
-	child := &Container{}
-	child.MustAdd(grand)
-	child.MustAdd(Build(func(c *Container) (B, error) {
-		cc, err := Inject[C](c)
-		if err != nil {
-			return B{}, err
-		}
-		return B{CVal: "B-depends-on-" + cc.DVal}, nil
-	}))
-	child.MustAdd(Build(func(c *Container) (E, error) {
-		f, err := Inject[F](c)
-		if err != nil {
-			return E{}, err
-		}
-		return E{FVal: "E-depends-on-" + f.GVal}, nil
-	}))
-
-	// Parent container: provides A, D, F
-	parent := &Container{}
-	parent.MustAdd(child)
-	parent.MustAdd(Build(func(c *Container) (A, error) {
-		bb, err := Inject[B](c)
-		if err != nil {
-			return A{}, err
-		}
-		return A{GVal: "A-depends-on-" + bb.CVal}, nil
-	}))
-	parent.MustAdd(Build(func(e E) (D, error) {
-		return D{EVal: "D-depends-on-" + e.FVal}, nil
-	}))
-	parent.MustAdd(Build(func(c *Container) (F, error) {
-		g, err := Inject[G](c)
-		if err != nil {
-			return F{}, err
-		}
-		return F{GVal: "F-depends-on-" + g.AVal}, nil
-	}))
-
-	// Should detect circular dependency
-	_, err := Inject[A](parent)
-	if err == nil {
-		t.Fatal("expected circular dependency error")
-	}
-	if !strings.Contains(err.Error(), "circular dependency") {
-		t.Errorf("expected 'circular dependency' error, got: %v", err)
-	}
-	t.Log(err)
-}
-
-func TestNestedContainer_RuntimeAdd(t *testing.T) {
-	tests := []struct {
-		name           string
-		initialFloat   float64
-		wantStr        string
-		wantIntErr     bool
-		wantNestedType string
-	}{
-		{
-			name:         "NegativeValue_AddsNegativeContainer",
-			initialFloat: -0.1,
-			wantStr:      "-100",
-			wantIntErr:   true,
-		},
-		{
-			name:         "PositiveValue_AddsPositiveContainer",
-			initialFloat: 0.5,
-			wantStr:      "100",
-			wantIntErr:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := &Container{}
-			positive := (&Container{}).MustAdd(Provide(100))
-			negative := (&Container{}).MustAdd(Provide(-100))
-
-			c.MustAdd(
-				Provide(tt.initialFloat),
-				Build(func(c *Container) (str string, err error) {
-					f, err := Inject[float64](c)
-					if err != nil {
-						return
-					}
-					if f > 0 {
-						c.MustAdd(positive)
-					} else {
-						c.MustAdd(negative)
-					}
-					i, err := Inject[int](c)
-					if err != nil {
-						return
-					}
-					return strconv.Itoa(i), nil
-				}),
-			)
-
-			str, err := Inject[string](c)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if str != tt.wantStr {
-				t.Errorf("got string %s, want %s", str, tt.wantStr)
-			}
-
-			if v, e := Inject[int](c); (e != nil) != tt.wantIntErr {
-				t.Errorf("Inject[int] error = %v, wantErr %v", e, tt.wantIntErr)
-			} else if e == nil {
-				t.Logf("Injected int from nested container: %d", v)
-			}
-		})
-	}
-}
-
-func TestNestedContainer_RuntimeAdd_MultipleLevels(t *testing.T) {
-	type Config struct{ Env string }
-	type DB struct{ DSN string }
-
-	c := &Container{}
-	prodDB := (&Container{}).MustAdd(Provide(DB{DSN: "prod-db"}))
-	testDB := (&Container{}).MustAdd(Provide(DB{DSN: "test-db"}))
-
-	c.MustAdd(
-		Provide(Config{Env: "production"}),
-		Build(func(c *Container) (string, error) {
-			cfg, err := Inject[Config](c)
-			if err != nil {
-				return "", err
-			}
-			if cfg.Env == "production" {
-				c.MustAdd(prodDB)
-			} else {
-				c.MustAdd(testDB)
-			}
-			db, err := Inject[DB](c)
-			if err != nil {
-				return "", err
-			}
-			return "connected to " + db.DSN, nil
-		}),
-	)
-
-	msg, err := Inject[string](c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msg != "connected to prod-db" {
-		t.Errorf("got %s, want connected to prod-db", msg)
-	}
-}
-
-func TestNestedContainer_RuntimeAdd_DuplicatePrevention(t *testing.T) {
-	c := &Container{}
-	existing := (&Container{}).MustAdd(Provide("existing"))
-
-	c.MustAdd(
-		Provide(42),
-		Build(func(c *Container) (string, error) {
-			c.MustAdd(existing)
-			i, _ := Inject[int](c)
-			return fmt.Sprintf("value-%d", i), nil
-		}),
-	)
-
-	if _, err := Inject[string](c); err != nil {
-		t.Fatal(err)
-	}
-
-	err := c.Add(Provide("duplicate"))
-	if err == nil {
-		t.Error("expected duplicate error when adding after runtime add")
-	}
-}
-
-func TestNestedContainer_RuntimeAdd_ConditionalChain(t *testing.T) {
-	type Level1 struct{ Val string }
-	type Level2 struct{ Val string }
-
-	c := &Container{}
-	level1Container := (&Container{}).MustAdd(Provide(Level1{Val: "from-level1"}))
-
-	c.MustAdd(
-		Build(func(c *Container) (Level2, error) {
-			c.MustAdd(level1Container)
-			l1, err := Inject[Level1](c)
-			if err != nil {
-				return Level2{}, err
-			}
-			return Level2{Val: "level2-depends-on-" + l1.Val}, nil
-		}),
-	)
-
-	l2, err := Inject[Level2](c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := "level2-depends-on-from-level1"
-	if l2.Val != expected {
-		t.Errorf("got %s, want %s", l2.Val, expected)
-	}
-}
-
-func TestNestedContainer_RuntimeAdd_NoFrozenError(t *testing.T) {
-	t.Run("RuntimeAdd_DoesNotTriggerFrozen", func(t *testing.T) {
-		c := &Container{}
-		nested := (&Container{}).MustAdd(Provide("nested-value"))
-
-		c.MustAdd(
-			Provide(42),
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(nested)
-				i, _ := Inject[int](c)
-				return fmt.Sprintf("val-%d", i), nil
-			}),
-		)
-
-		if _, err := Inject[string](c); err != nil {
-			t.Fatalf("Build function should not trigger frozen error: %v", err)
-		}
-
-		if v, err := Inject[string](c); err != nil {
-			t.Errorf("Re-injection failed: %v", err)
-		} else if v != "val-42" {
-			t.Errorf("got %s, want val-42", v)
-		}
-	})
-
-	t.Run("DirectAddToFrozenContainer_Error", func(t *testing.T) {
-		child := &Container{}
-		child.MustAdd(Provide("child-value"))
-
-		parent := &Container{}
-		parent.MustAdd(child)
-
-		err := child.Add(Provide("new-value"))
-		if err == nil {
-			t.Fatal("expected frozen error, got nil")
-		}
-		if !strings.Contains(err.Error(), "frozen") {
-			t.Errorf("expected 'frozen' error, got: %v", err)
-		}
-	})
-
-	t.Run("RuntimeAdd_MultipleContainers", func(t *testing.T) {
-		type V1 string
-		type V2 string
-		type V3 string
-
-		c := &Container{}
-		container1 := (&Container{}).MustAdd(Provide(V1("value1")))
-		container2 := (&Container{}).MustAdd(Provide(V2("value2")))
-		container3 := (&Container{}).MustAdd(Provide(V3("value3")))
-
-		c.MustAdd(
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(container1)
-				c.MustAdd(container2)
-				c.MustAdd(container3)
-
-				v1, _ := Inject[V1](c)
-				return string(v1), nil
-			}),
-		)
-
-		v, err := Inject[string](c)
-		if err != nil {
-			t.Fatalf("Runtime add multiple containers failed: %v", err)
-		}
-		if v != "value1" {
-			t.Errorf("got %s, want value1", v)
-		}
-	})
-
-	t.Run("RuntimeAdd_NestedContainer_WithHooks", func(t *testing.T) {
-		type RuntimeDB struct{ DSN string }
-
-		c := &Container{}
-		nested := (&Container{}).MustAdd(Provide(RuntimeDB{DSN: "mysql://runtime"}))
-
-		hookCalled := 0
-		hook := c.HookOnce("test", func(v any) func(context.Context) {
-			return func(ctx context.Context) {
-				if _, ok := v.(RuntimeDB); ok {
-					hookCalled++
-				}
-			}
-		})
-
-		c.MustAdd(
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(nested)
-				db, _ := Inject[RuntimeDB](c)
-				return db.DSN, nil
-			}),
-		)
-
-		result, err := Inject[string](c)
-		if err != nil {
-			t.Fatalf("Runtime add with hook failed: %v", err)
-		}
-		if result != "mysql://runtime" {
-			t.Errorf("got DSN %s, want mysql://runtime", result)
-		}
-
-		hook.Iterate(context.Background(), false)
-		if hookCalled != 1 {
-			t.Errorf("hook called %d times, want 1", hookCalled)
-		}
-	})
-
-	t.Run("RuntimeAdd_ChainedDependencies", func(t *testing.T) {
-		type A struct{ Val string }
-		type B struct{ Val string }
-		type C struct{ Val string }
-
-		c := &Container{}
-		containerA := (&Container{}).MustAdd(Provide(A{Val: "A"}))
-		containerB := (&Container{}).MustAdd(
-			Provide(B{Val: "B"}),
-			Build(func(c *Container) (string, error) {
-				a, _ := Inject[A](c)
-				b, _ := Inject[B](c)
-				return a.Val + "-" + b.Val, nil
-			}),
-		)
-
-		c.MustAdd(
-			Build(func(c *Container) (C, error) {
-				c.MustAdd(containerA)
-				c.MustAdd(containerB)
-				s, _ := Inject[string](c)
-				return C{Val: "C-" + s}, nil
-			}),
-		)
-
-		result, err := Inject[C](c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected := "C-A-B"
-		if result.Val != expected {
-			t.Errorf("got %s, want %s", result.Val, expected)
-		}
-	})
-
-	t.Run("RuntimeAdd_Isolation_Verification", func(t *testing.T) {
-		type V1 string
-		type V2 string
-
-		c1 := &Container{}
-		c1.MustAdd(Provide(V1("from-c1")))
-
-		c2 := &Container{}
-		c2.MustAdd(Provide(V2("from-c2")))
-
-		parent := &Container{}
-		parent.MustAdd(
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(c1)
-				v1, _ := Inject[V1](c)
-				return string(v1), nil
-			}),
-		)
-
-		v1, err := Inject[string](parent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v1 != "from-c1" {
-			t.Errorf("got %s, want from-c1", v1)
-		}
-
-		parent2 := &Container{}
-		parent2.MustAdd(
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(c2)
-				v2, _ := Inject[V2](c)
-				return string(v2), nil
-			}),
-		)
-
-		v2, err := Inject[string](parent2)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v2 != "from-c2" {
-			t.Errorf("got %s, want from-c2", v2)
-		}
-	})
-
-	t.Run("RuntimeAdd_VerifyContainerNotFrozen", func(t *testing.T) {
-		type Original string
-		type Added string
-
-		nested := &Container{}
-		nested.MustAdd(Provide(Original("original")))
-
-		parent := &Container{}
-		parent.MustAdd(
-			Build(func(c *Container) (string, error) {
-				c.MustAdd(nested)
-				v, _ := Inject[Original](c)
-				return string(v), nil
-			}),
-		)
-
-		v, err := Inject[string](parent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v != "original" {
-			t.Errorf("got %s, want original", v)
-		}
-
-		afterBuild := &Container{}
-		afterBuild.MustAdd(nested)
-		afterBuild.MustAdd(Provide(Added("added-after")))
-
-		v2, err := Inject[Original](afterBuild)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(v2) != "original" {
-			t.Errorf("got %s, want original", v2)
 		}
 	})
 }

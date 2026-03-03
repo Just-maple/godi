@@ -13,11 +13,11 @@ type Provider interface {
 
 type provider[T any] func(*Container, *T) (T, error)
 
-func (p provider[T]) Provide(a any) (any, bool)                 { _, ok := a.(*T); return (*T)(nil), ok }
+func (p provider[T]) Provide(v any) (any, bool)                 { _, ok := v.(*T); return (*T)(nil), ok }
 func (p provider[T]) inject(c *Container, ptr any) (any, error) { return p(c, ptr.(*T)) }
 
 func Provide[T any](v T) Provider {
-	return provider[T](func(c *Container, p *T) (T, error) { *p = v; return v, nil })
+	return provider[T](func(c *Container, ptr *T) (T, error) { *ptr = v; return v, nil })
 }
 
 func Build[T any](f func(*Container) (T, error)) Provider {
@@ -57,21 +57,21 @@ type Container struct {
 	providers sync.Map
 }
 
-var empty = &Container{}
+var locked = &Container{}
 
-func (c *Container) Add(ps ...Provider) error {
+func (c *Container) Add(pvs ...Provider) error {
 	for acquired, val := new(Container), any(nil); val != acquired; {
-		if val, _ = c.providers.LoadOrStore(empty, acquired); val == empty {
+		if val, _ = c.providers.LoadOrStore(locked, acquired); val == locked {
 			return errors.New("container frozen: already provided as child")
 		}
 	}
-	defer c.providers.Delete(empty)
-	for _, p := range ps {
+	defer c.providers.Delete(locked)
+	for _, p := range pvs {
 		id, _ := p.Provide(nil)
-		if _id, provided := c.Provide(id); provided {
-			return fmt.Errorf("provider %T already exists", _id)
+		if typ, provided := c.Provide(id); provided {
+			return fmt.Errorf("provider %T already exists", typ)
 		} else if sub, ok := id.(*Container); ok {
-			sub.providers.Store(empty, empty)
+			sub.providers.Store(locked, locked)
 		}
 		c.providers.Store(id, p)
 	}
@@ -91,58 +91,58 @@ func (c *Container) Provide(v any) (id any, ok bool) {
 	return id, ok
 }
 
-func (c *Container) inject(_ *Container, v any) (value any, err error) {
+func (c *Container) inject(_ *Container, ptr any) (value any, err error) {
 	if c.providers.Range(func(_, p any) bool {
 		pv := p.(Provider)
-		if id, ok := pv.Provide(v); ok {
-			value, err = c.injectFrom(pv, id, v)
+		if id, ok := pv.Provide(ptr); ok {
+			value, err = c.from(pv, id, ptr)
 		}
 		return value == nil && err == nil
 	}); value == nil && err == nil {
-		err = fmt.Errorf("provider %T not found", v)
+		err = fmt.Errorf("provider %T not found", ptr)
 	}
 	return
 }
 
-func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
-	if vv, on := c.providers.Load(id); on && vv == empty {
+func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
+	if stat, _ := c.providers.Load(id); stat == locked {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
 	}
-	nc := &Container{hooks: c.hooks}
+	cp := &Container{hooks: c.hooks}
 	c.providers.Range(func(k, v interface{}) bool {
 		if k == id {
-			v = empty
+			v = locked
 		}
-		nc.providers.Store(k, v)
+		cp.providers.Store(k, v)
 		return true
 	})
-	if v, err = p.inject(nc, ptr); err == nil && nc.hooks != nil {
-		nc.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
+	if v, err = p.inject(cp, ptr); err == nil && cp.hooks != nil {
+		cp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
 	return
 }
 
-func (c *Container) Inject(ps ...any) error {
-	for _, p := range ps {
-		if _, e := c.inject(c, p); e != nil {
+func (c *Container) Inject(ptrs ...any) error {
+	for _, ptr := range ptrs {
+		if _, e := c.inject(c, ptr); e != nil {
 			return e
 		}
 	}
 	return nil
 }
 
-func InjectTo[T any](c *Container, v *T) (err error) {
+func InjectTo[T any](c *Container, ptr *T) (err error) {
 	id := (*T)(nil)
 	if p, ok := c.providers.Load(id); ok {
-		_, err = c.injectFrom(p.(Provider), id, v)
+		_, err = c.from(p.(Provider), id, ptr)
 	} else {
-		_, err = c.inject(c, v)
+		_, err = c.inject(c, ptr)
 	}
 	return
 }
 
-func InjectAs(c *Container, v ...any) (err error) { return c.Inject(v...) }
-func Inject[T any](c *Container) (v T, _ error)   { return v, InjectTo[T](c, &v) }
-func MustInjectAs(c *Container, v any)            { must(InjectAs(c, v)) }
-func MustInjectTo[T any](c *Container, v *T)      { must(InjectTo[T](c, v)) }
-func MustInject[T any](c *Container) (v T)        { MustInjectTo[T](c, &v); return }
+func MustInjectTo[T any](c *Container, v *T)         { must(InjectTo[T](c, v)) }
+func Inject[T any](c *Container) (v T, _ error)      { return v, InjectTo[T](c, &v) }
+func MustInject[T any](c *Container) (v T)           { MustInjectTo[T](c, &v); return }
+func InjectAs(c *Container, ptrs ...any) (err error) { return c.Inject(ptrs...) }
+func MustInjectAs(c *Container, ptrs ...any)         { must(InjectAs(c, ptrs...)) }

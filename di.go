@@ -97,13 +97,13 @@ func (c *Container) Provide(v any) (id any, ok bool) {
 
 func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	ok := false
-	if c.providers.Range(func(id, p any) bool {
+	if c.providers.Range(func(_, p any) bool {
 		pv := p.(Provider)
-		if id, ok = pv.Provide(ptr); ok {
+		if value, ok = pv.Provide(ptr); ok {
 			cp := &Container{hooks: c.hooks}
 			parent.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
 			c.providers.Range(func(k, v interface{}) bool { cp.providers.Store(k, v); return true })
-			value, err = cp.from(pv, id, ptr)
+			value, err = cp.from(pv, value, ptr)
 		}
 		return !ok
 	}); !ok {

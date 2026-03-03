@@ -124,14 +124,14 @@ func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
 
 func (c *Container) Inject(ps ...any) error {
 	for _, p := range ps {
-		if e := InjectAs(p, c); e != nil {
+		if _, e := c.inject(c, p); e != nil {
 			return e
 		}
 	}
 	return nil
 }
 
-func InjectTo[T any](v *T, c *Container) (err error) {
+func InjectTo[T any](c *Container, v *T) (err error) {
 	id := (*T)(nil)
 	if p, ok := c.providers.Load(id); ok {
 		_, err = c.injectFrom(p.(Provider), id, v)
@@ -141,8 +141,8 @@ func InjectTo[T any](v *T, c *Container) (err error) {
 	return
 }
 
-func InjectAs(v any, c *Container) (err error)  { _, err = c.inject(c, v); return }
-func Inject[T any](c *Container) (v T, _ error) { return v, InjectTo(&v, c) }
-func MustInjectAs(v any, c *Container)          { must(InjectAs(v, c)) }
-func MustInjectTo[T any](v *T, c *Container)    { must(InjectTo(v, c)) }
-func MustInject[T any](c *Container) (v T)      { MustInjectTo[T](&v, c); return }
+func InjectAs(c *Container, v ...any) (err error) { return c.Inject(v...) }
+func Inject[T any](c *Container) (v T, _ error)   { return v, InjectTo[T](c, &v) }
+func MustInjectAs(c *Container, v any)            { must(InjectAs(c, v)) }
+func MustInjectTo[T any](c *Container, v *T)      { must(InjectTo[T](c, v)) }
+func MustInject[T any](c *Container) (v T)        { MustInjectTo[T](c, &v); return }

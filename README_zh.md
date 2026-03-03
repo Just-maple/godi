@@ -91,8 +91,8 @@ c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
 |------|--------|-------|----------|
 | `Inject[T](c)` | `(T, error)` | 否 | 标准注入 |
 | `MustInject[T](c)` | `T` | 是 | 确定存在 |
-| `InjectTo(&v, c)` | `error` | 否 | 注入到现有变量 |
-| `InjectAs(&v, c)` | `error` | 否 | 非泛型注入 |
+| `InjectTo(c, &v)` | `error` | 否 | 注入到现有变量 |
+| `InjectAs(c, &v)` | `error` | 否 | 非泛型注入 |
 | `c.Inject(&a, &b)` | `error` | 否 | 多重注入 |
 
 ```go
@@ -104,7 +104,7 @@ db := godi.MustInject[*Database](c)
 
 // 注入到现有变量
 var db Database
-err := godi.InjectTo(&db, c)
+err := godi.InjectTo(c, &db)
 
 // 多重注入
 service := &Service{}

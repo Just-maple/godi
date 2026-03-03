@@ -91,8 +91,8 @@ c.Add(godi.Chain(func(cfg Config) (*Connection, error) {
 |--------|---------|--------|----------|
 | `Inject[T](c)` | `(T, error)` | No | Standard injection |
 | `MustInject[T](c)` | `T` | Yes | Known to exist |
-| `InjectTo(&v, c)` | `error` | No | Inject to existing var |
-| `InjectAs(&v, c)` | `error` | No | Non-generic injection |
+| `InjectTo(c, &v)` | `error` | No | Inject to existing var |
+| `InjectAs(c, &v)` | `error` | No | Non-generic injection |
 | `c.Inject(&a, &b)` | `error` | No | Multi-injection |
 
 ```go
@@ -104,7 +104,7 @@ db := godi.MustInject[*Database](c)
 
 // Inject to existing variable
 var db Database
-err := godi.InjectTo(&db, c)
+err := godi.InjectTo(c, &db)
 
 // Multi-injection
 service := &Service{}

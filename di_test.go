@@ -159,7 +159,7 @@ func TestInject_ErrorCases(t *testing.T) {
 	}{
 		{name: "not found", setup: func() *Container { return &Container{} }, injectFn: func(c *Container) error {
 			var db Database
-			return InjectTo(&db, c)
+			return InjectTo[Database](c, &db)
 		}, wantErr: true},
 		{name: "wrong type", setup: func() *Container {
 			c := &Container{}
@@ -167,7 +167,7 @@ func TestInject_ErrorCases(t *testing.T) {
 			return c
 		}, injectFn: func(c *Container) error {
 			var cfg Config
-			return InjectTo(&cfg, c)
+			return InjectTo[Config](c, &cfg)
 		}, wantErr: true},
 	}
 	for _, tt := range tests {
@@ -696,7 +696,7 @@ func TestInjectAs(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
 	db := Database{}
-	err := InjectAs(&db, c)
+	err := InjectAs(c, &db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -709,7 +709,7 @@ func TestMustInjectAs(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
 	db := Database{}
-	MustInjectAs(&db, c)
+	MustInjectAs(c, &db)
 	if db.DSN != "mysql://localhost" {
 		t.Errorf("expected mysql://localhost, got %s", db.DSN)
 	}
@@ -719,7 +719,7 @@ func TestMustInjectTo(t *testing.T) {
 	c := &Container{}
 	c.MustAdd(Provide(Database{DSN: "mysql://localhost"}))
 	var db Database
-	MustInjectTo(&db, c)
+	MustInjectTo(c, &db)
 	if db.DSN != "mysql://localhost" {
 		t.Errorf("expected mysql://localhost, got %s", db.DSN)
 	}
@@ -752,7 +752,7 @@ func TestMustInjectAs_Panic(t *testing.T) {
 		}
 	}()
 	db := Database{}
-	MustInjectAs(&db, c)
+	MustInjectAs(c, &db)
 }
 
 func TestMustInjectTo_Panic(t *testing.T) {
@@ -763,7 +763,7 @@ func TestMustInjectTo_Panic(t *testing.T) {
 		}
 	}()
 	var db Database
-	MustInjectTo(&db, c)
+	MustInjectTo(c, &db)
 }
 
 func TestContainer_Inject(t *testing.T) {
@@ -1263,7 +1263,7 @@ func BenchmarkInjectAs(b *testing.B) {
 	b.ResetTimer()
 	var db Database
 	for i := 0; i < b.N; i++ {
-		_ = InjectAs(&db, c)
+		_ = InjectAs(c, &db)
 	}
 }
 
@@ -1294,7 +1294,7 @@ func BenchmarkContainer_ConcurrentAdd(b *testing.B) {
 				wg.Add(1)
 				go func(id int) {
 					defer wg.Done()
-					c.Add(Provide(CntTypeA{ID: id}))
+					_ = c.Add(Provide(CntTypeA{ID: id}))
 				}(j)
 			}
 			wg.Wait()
@@ -1315,7 +1315,7 @@ func BenchmarkContainer_ConcurrentNestedAdd(b *testing.B) {
 					defer wg.Done()
 					child := &Container{}
 					child.MustAdd(Provide(CntTypeA{ID: id}))
-					parent.Add(child)
+					_ = parent.Add(child)
 				}(j)
 			}
 			wg.Wait()

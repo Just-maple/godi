@@ -35,6 +35,6 @@ func main() {
 
 	// Use MustInjectTo to inject directly into variable
 	var extraDB Database
-	godi.MustInjectTo(&extraDB, c)
+	godi.MustInjectTo(c, &extraDB)
 	fmt.Printf("Extra Database: %s\n", extraDB.DSN)
 }

@@ -9,12 +9,11 @@ type Callbacks func(func([]func(ctx context.Context)))
 
 func (callbacks Callbacks) Iterate(ctx context.Context, reverse bool) {
 	callbacks(func(fns []func(ctx context.Context)) {
-		for i := 0; i < len(fns); i++ {
-			fn := fns[i]
-			if reverse {
-				fn = fns[len(fns)-1-i]
+		for v, i, l := 0, 0, len(fns); i < l; i++ {
+			if v = i; reverse {
+				v = l - i - 1
 			}
-			fn(ctx)
+			fns[v](ctx)
 		}
 	})
 }
@@ -26,19 +25,15 @@ func (c *Container) Hook(name string, build func(v any, provided int) func(ctx c
 	fns := make([]func(context.Context), 0)
 	c.hooks.Store(name, func(id, v any) {
 		mu.Lock()
-		count := called[id]
-		called[id]++
-		mu.Unlock()
-		if fn := build(v, count); fn != nil {
-			mu.Lock()
+		defer mu.Unlock()
+		if fn := build(v, called[id]); fn != nil {
 			fns = append(fns, fn)
-			mu.Unlock()
 		}
+		called[id]++
 	})
 	return func(f func([]func(ctx context.Context))) {
 		mu.Lock()
-		cbs := make([]func(context.Context), len(fns))
-		copy(cbs, fns)
+		cbs := append(make([]func(context.Context), 0, len(fns)), fns...)
 		mu.Unlock()
 		f(cbs)
 	}

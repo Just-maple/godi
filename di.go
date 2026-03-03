@@ -6,6 +6,14 @@ import (
 	"sync"
 )
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func typName(ptr interface{}) string { return fmt.Sprintf("%T", ptr)[1:] }
+
 type Provider interface {
 	inject(c *Container, ptr any) (v any, err error)
 	Provide(any) (any, bool)
@@ -38,17 +46,11 @@ func Build[R, T any](f func(R) (T, error)) Provider {
 			}
 		}
 		if l.once.Do(func() { l.value, l.err = f(v) }); l.err != nil {
-			return zero, fmt.Errorf("build %T error: %w", l.value, l.err)
+			return zero, fmt.Errorf("build %s error: %w", typName(l.value), l.err)
 		}
 		*ptr = l.value
 		return l.value, nil
 	})
-}
-
-func must(err error) {
-	if err != nil {
-		panic(err)
-	}
 }
 
 type Container struct {
@@ -69,7 +71,7 @@ func (c *Container) Add(pvs ...Provider) error {
 	for _, p := range pvs {
 		id, _ := p.Provide(nil)
 		if typ, provided := c.Provide(id); provided {
-			return fmt.Errorf("provider %T already exists", typ)
+			return fmt.Errorf("provider %s already exists", typName(typ))
 		} else if sub, ok := id.(*Container); ok {
 			sub.providers.Store(locked, locked)
 		}
@@ -100,14 +102,14 @@ func (c *Container) inject(_ *Container, ptr any) (value any, err error) {
 		}
 		return !ok
 	}); !ok {
-		err = fmt.Errorf("provider %T not found", ptr)
+		err = fmt.Errorf("provider %s not found", typName(ptr))
 	}
 	return
 }
 
 func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
 	if stat, _ := c.providers.Load(id); stat == locked {
-		return nil, fmt.Errorf("circular dependency for %T", ptr)
+		return nil, fmt.Errorf("circular dependency for %s", typName(ptr))
 	}
 	cp := &Container{hooks: c.hooks}
 	c.providers.Range(func(k, v interface{}) bool {

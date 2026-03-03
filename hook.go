@@ -20,6 +20,7 @@ func (hooks Hooks) Iterate(ctx context.Context, reverse bool) {
 }
 
 func (c *Container) Hook(name string, build func(v any, provided int) func(ctx context.Context)) Hooks {
+	c.once.Do(func() { c.hooks = new(sync.Map) })
 	mu := sync.Mutex{}
 	called := make(map[any]int)
 	fns := make([]func(context.Context), 0)

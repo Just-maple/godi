@@ -1,6 +1,7 @@
 package godi
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -51,9 +52,33 @@ func must(err error) {
 }
 
 type Container struct {
+	once      sync.Once
+	hooks     *sync.Map
 	providers sync.Map
-	hooks     sync.Map
 }
+
+var empty = &Container{}
+
+func (c *Container) Add(ps ...Provider) error {
+	for acquired, val := new(Container), any(nil); val != acquired; {
+		if val, _ = c.providers.LoadOrStore(empty, acquired); val == empty {
+			return errors.New("container frozen: already provided as child")
+		}
+	}
+	defer c.providers.Delete(empty)
+	for _, p := range ps {
+		id, _ := p.Provide(nil)
+		if _id, provided := c.Provide(id); provided {
+			return fmt.Errorf("provider %T already exists", _id)
+		} else if sub, ok := id.(*Container); ok {
+			sub.providers.Store(empty, empty)
+		}
+		c.providers.Store(id, p)
+	}
+	return nil
+}
+
+func (c *Container) MustAdd(ps ...Provider) *Container { must(c.Add(ps...)); return c }
 
 func (c *Container) Provide(v any) (id any, ok bool) {
 	if v == nil {
@@ -69,8 +94,8 @@ func (c *Container) Provide(v any) (id any, ok bool) {
 func (c *Container) inject(_ *Container, v any) (value any, err error) {
 	if c.providers.Range(func(_, p any) bool {
 		pv := p.(Provider)
-		if _id, ok := pv.Provide(v); ok {
-			value, err = c.injectFrom(pv, _id, v)
+		if id, ok := pv.Provide(v); ok {
+			value, err = c.injectFrom(pv, id, v)
 		}
 		return value == nil && err == nil
 	}); value == nil && err == nil {
@@ -79,46 +104,19 @@ func (c *Container) inject(_ *Container, v any) (value any, err error) {
 	return
 }
 
-var empty = &Container{}
-
-func (c *Container) Add(ps ...Provider) error {
-	if parent, exist := c.providers.Load(empty); exist {
-		return fmt.Errorf("container frozen: already provided to %T %p", parent, parent)
-	}
-	for _, p := range ps {
-		id, _ := p.Provide(nil)
-		if _id, provided := c.Provide(id); provided {
-			return fmt.Errorf("provider %T already exists", _id)
-		} else if sub, ok := id.(*Container); ok {
-			sub.providers.Store(empty, empty)
-		}
-		c.providers.Store(id, p)
-	}
-	return nil
-}
-
-func (c *Container) MustAdd(ps ...Provider) *Container {
-	for _, p := range ps {
-		must(c.Add(p))
-	}
-	return c
-}
-
-func (c *Container) copy() *Container {
-	nc := &Container{}
-	cp := func(d, s *sync.Map) { s.Range(func(k, v interface{}) bool { d.Store(k, v); return true }) }
-	cp(&nc.providers, &c.providers)
-	cp(&nc.hooks, &c.hooks)
-	return nc
-}
-
 func (c *Container) injectFrom(p Provider, id, ptr any) (v any, err error) {
 	if vv, on := c.providers.Load(id); on && vv == empty {
 		return nil, fmt.Errorf("circular dependency for %T", ptr)
 	}
-	nc := c.copy()
-	nc.providers.Store(id, empty)
-	if v, err = p.inject(nc, ptr); err == nil {
+	nc := &Container{hooks: c.hooks}
+	c.providers.Range(func(k, v interface{}) bool {
+		if k == id {
+			v = empty
+		}
+		nc.providers.Store(k, v)
+		return true
+	})
+	if v, err = p.inject(nc, ptr); err == nil && nc.hooks != nil {
 		nc.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
 	return
@@ -137,9 +135,9 @@ func InjectTo[T any](v *T, c *Container) (err error) {
 	id := (*T)(nil)
 	if p, ok := c.providers.Load(id); ok {
 		_, err = c.injectFrom(p.(Provider), id, v)
-		return
+	} else {
+		_, err = c.inject(c, v)
 	}
-	_, err = c.inject(c, v)
 	return
 }
 

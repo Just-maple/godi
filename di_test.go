@@ -27,6 +27,12 @@ type bench7 struct{ Val int }
 type bench8 struct{ Val int }
 type bench9 struct{ Val int }
 
+// Concurrent test reusable types
+type CntTypeA struct{ ID int }
+type CntTypeB struct{ ID int }
+type CntTypeC struct{ ID int }
+type CntTypeD struct{ ID int }
+
 func TestProvide(t *testing.T) {
 	db := Database{DSN: "mysql://localhost"}
 	p := Provide(db)
@@ -2994,4 +3000,676 @@ func TestNestedContainer_TypeDetection_ErrorPropagation(t *testing.T) {
 		t.Fatal("expected error propagation from child")
 	}
 	t.Logf("Got expected error: %v", err)
+}
+
+// ============== Concurrent Add Tests ==============
+
+func TestContainer_ConcurrentAdd(t *testing.T) {
+	type Config struct{ ID int }
+
+	c := &Container{}
+	const count = 100
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			err := c.Add(Provide(Config{ID: id}))
+			errors <- err
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	errorCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		} else {
+			errorCount++
+		}
+	}
+
+	if successCount != 1 {
+		t.Errorf("expected exactly 1 successful Add, got %d", successCount)
+	}
+	if errorCount != count-1 {
+		t.Errorf("expected %d duplicate errors, got %d", count-1, errorCount)
+	}
+}
+
+func TestContainer_ConcurrentAdd_DifferentTypes(t *testing.T) {
+	type CA0 struct{ ID int }
+	type CA1 struct{ ID int }
+	type CA2 struct{ ID int }
+	type CA3 struct{ ID int }
+	type CA4 struct{ ID int }
+	type CA5 struct{ ID int }
+	type CA6 struct{ ID int }
+	type CA7 struct{ ID int }
+	type CA8 struct{ ID int }
+	type CA9 struct{ ID int }
+
+	c := &Container{}
+	const goroutines = 50
+
+	var wg sync.WaitGroup
+	errors := make(chan error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := c.Add(
+				Provide(CA0{ID: rand.Int()}),
+				Provide(CA1{ID: rand.Int()}),
+				Provide(CA2{ID: rand.Int()}),
+				Provide(CA3{ID: rand.Int()}),
+				Provide(CA4{ID: rand.Int()}),
+				Provide(CA5{ID: rand.Int()}),
+				Provide(CA6{ID: rand.Int()}),
+				Provide(CA7{ID: rand.Int()}),
+				Provide(CA8{ID: rand.Int()}),
+				Provide(CA9{ID: rand.Int()}),
+			)
+			errors <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		}
+	}
+
+	t.Logf("successful adds: %d", successCount)
+
+	for i := 0; i < 10; i++ {
+		var id any
+		switch i {
+		case 0:
+			id, _ = Inject[CA0](c)
+		case 1:
+			id, _ = Inject[CA1](c)
+		case 2:
+			id, _ = Inject[CA2](c)
+		case 3:
+			id, _ = Inject[CA3](c)
+		case 4:
+			id, _ = Inject[CA4](c)
+		case 5:
+			id, _ = Inject[CA5](c)
+		case 6:
+			id, _ = Inject[CA6](c)
+		case 7:
+			id, _ = Inject[CA7](c)
+		case 8:
+			id, _ = Inject[CA8](c)
+		case 9:
+			id, _ = Inject[CA9](c)
+		}
+		if id == nil {
+			t.Errorf("failed to inject type CA%d", i)
+		}
+	}
+}
+
+func TestContainer_ConcurrentAdd_MustAdd(t *testing.T) {
+	type MConfig struct{ ID int }
+
+	c := &Container{}
+	const count = 50
+
+	var wg sync.WaitGroup
+	panicCount := 0
+	var mu sync.Mutex
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					panicCount++
+					mu.Unlock()
+				}
+			}()
+			c.MustAdd(Provide(MConfig{ID: id}))
+		}(i)
+	}
+
+	wg.Wait()
+
+	if panicCount < 1 {
+		t.Errorf("expected at least 1 panic from duplicate Add, got %d", panicCount)
+	}
+}
+
+func TestContainer_ConcurrentAddAndInject(t *testing.T) {
+	type CIConfig struct{ Value int }
+
+	c := &Container{}
+	c.MustAdd(Provide(CIConfig{Value: 42}))
+
+	const count = 100
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg, err := Inject[CIConfig](c)
+			if err != nil {
+				errors <- fmt.Errorf("inject failed: %w", err)
+				return
+			}
+			if cfg.Value != 42 {
+				errors <- fmt.Errorf("expected 42, got %d", cfg.Value)
+				return
+			}
+			errors <- nil
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// ============== Concurrent Nested Add Tests ==============
+
+func TestContainer_ConcurrentNestedAdd(t *testing.T) {
+	parent := &Container{}
+	const count = 50
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			child := &Container{}
+			child.MustAdd(Provide(CntTypeA{ID: id}))
+			err := parent.Add(child)
+			errors <- err
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	errorCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		} else {
+			errorCount++
+		}
+	}
+
+	if successCount != 1 {
+		t.Errorf("expected exactly 1 successful nested Add, got %d", successCount)
+	}
+	if errorCount != count-1 {
+		t.Errorf("expected %d duplicate errors, got %d", count-1, errorCount)
+	}
+
+	if _, err := Inject[CntTypeA](parent); err != nil {
+		t.Errorf("failed to inject CntTypeA: %v", err)
+	}
+}
+
+func TestContainer_ConcurrentNestedAdd_MultipleChildren(t *testing.T) {
+	parent := &Container{}
+	const count = 30
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			child := &Container{}
+			switch idx % 3 {
+			case 0:
+				child.MustAdd(Provide(CntTypeA{ID: idx}))
+			case 1:
+				child.MustAdd(Provide(CntTypeB{ID: idx}))
+			case 2:
+				child.MustAdd(Provide(CntTypeC{ID: idx}))
+			}
+			err := parent.Add(child)
+			errors <- err
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		}
+	}
+
+	t.Logf("successful adds: %d", successCount)
+
+	if _, err := Inject[CntTypeA](parent); err != nil {
+		t.Errorf("failed to inject CntTypeA: %v", err)
+	}
+	if _, err := Inject[CntTypeB](parent); err != nil {
+		t.Errorf("failed to inject CntTypeB: %v", err)
+	}
+	if _, err := Inject[CntTypeC](parent); err != nil {
+		t.Errorf("failed to inject CntTypeC: %v", err)
+	}
+}
+
+func TestContainer_ConcurrentNestedAdd_ThreeLevels(t *testing.T) {
+	root := &Container{}
+	const count = 20
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			level1 := &Container{}
+			level1.MustAdd(Provide(CntTypeA{ID: id}))
+
+			level2 := &Container{}
+			level2.MustAdd(level1, Provide(CntTypeB{ID: id * 10}))
+
+			err := root.Add(level2)
+			errors <- err
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	errorCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		} else {
+			errorCount++
+		}
+	}
+
+	if successCount != 1 {
+		t.Errorf("expected exactly 1 successful nested Add, got %d", successCount)
+	}
+	t.Logf("duplicate errors: %d", errorCount)
+
+	if _, err := Inject[CntTypeA](root); err != nil {
+		t.Errorf("failed to inject CntTypeA: %v", err)
+	}
+	if _, err := Inject[CntTypeB](root); err != nil {
+		t.Errorf("failed to inject CntTypeB: %v", err)
+	}
+}
+
+func TestContainer_ConcurrentNestedAddAndInject(t *testing.T) {
+	type CNIConfig struct{ Value int }
+
+	child := &Container{}
+	child.MustAdd(Provide(CNIConfig{Value: 100}))
+
+	parent := &Container{}
+	parent.MustAdd(child)
+
+	const count = 100
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg, err := Inject[CNIConfig](parent)
+			if err != nil {
+				errors <- fmt.Errorf("inject from nested failed: %w", err)
+				return
+			}
+			if cfg.Value != 100 {
+				errors <- fmt.Errorf("expected 100, got %d", cfg.Value)
+				return
+			}
+			errors <- nil
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestContainer_ConcurrentNestedAdd_DifferentLevels(t *testing.T) {
+	root := &Container{}
+	const count = 30
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			switch idx % 3 {
+			case 0:
+				child := &Container{}
+				child.MustAdd(Provide(CntTypeA{ID: idx}))
+				err := root.Add(child)
+				errors <- err
+			case 1:
+				level1 := &Container{}
+				level1.MustAdd(Provide(CntTypeB{ID: idx}))
+				level2 := &Container{}
+				level2.MustAdd(level1)
+				err := root.Add(level2)
+				errors <- err
+			case 2:
+				level1 := &Container{}
+				level1.MustAdd(Provide(CntTypeC{ID: idx}))
+				level2 := &Container{}
+				level2.MustAdd(level1)
+				level3 := &Container{}
+				level3.MustAdd(level2)
+				err := root.Add(level3)
+				errors <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		}
+	}
+
+	t.Logf("successful nested adds at different levels: %d", successCount)
+
+	if _, err := Inject[CntTypeA](root); err != nil {
+		t.Errorf("failed to inject CntTypeA: %v", err)
+	}
+	if _, err := Inject[CntTypeB](root); err != nil {
+		t.Errorf("failed to inject CntTypeB: %v", err)
+	}
+	if _, err := Inject[CntTypeC](root); err != nil {
+		t.Errorf("failed to inject CntTypeC: %v", err)
+	}
+}
+
+func TestContainer_ConcurrentMixedAddAndNestedAdd(t *testing.T) {
+	c := &Container{}
+	const count = 40
+
+	var wg sync.WaitGroup
+	errors := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			switch idx % 2 {
+			case 0:
+				err := c.Add(Provide(CntTypeA{ID: idx}))
+				errors <- err
+			case 1:
+				child := &Container{}
+				child.MustAdd(Provide(CntTypeB{ID: idx}))
+				err := c.Add(child)
+				errors <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	successCount := 0
+	for err := range errors {
+		if err == nil {
+			successCount++
+		}
+	}
+
+	t.Logf("successful mixed adds: %d", successCount)
+
+	if successCount < 2 {
+		t.Errorf("expected at least 2 successful adds (1 direct + 1 nested), got %d", successCount)
+	}
+
+	if _, err := Inject[CntTypeA](c); err != nil {
+		t.Errorf("failed to inject CntTypeA: %v", err)
+	}
+	if _, err := Inject[CntTypeB](c); err != nil {
+		t.Errorf("failed to inject CntTypeB: %v", err)
+	}
+}
+
+func BenchmarkContainer_ConcurrentAdd(b *testing.B) {
+	type BCConfig struct{ ID int }
+
+	b.Run("SameType", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			c := &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 10; j++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					c.Add(Provide(BCConfig{ID: id}))
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+
+	b.Run("DifferentTypes", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			c := &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 10; j++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					switch id % 10 {
+					case 0:
+						c.Add(Provide(bench0{Val: id}))
+					case 1:
+						c.Add(Provide(bench1{Val: id}))
+					case 2:
+						c.Add(Provide(bench2{Val: id}))
+					case 3:
+						c.Add(Provide(bench3{Val: id}))
+					case 4:
+						c.Add(Provide(bench4{Val: id}))
+					case 5:
+						c.Add(Provide(bench5{Val: id}))
+					case 6:
+						c.Add(Provide(bench6{Val: id}))
+					case 7:
+						c.Add(Provide(bench7{Val: id}))
+					case 8:
+						c.Add(Provide(bench8{Val: id}))
+					case 9:
+						c.Add(Provide(bench9{Val: id}))
+					}
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+}
+
+func BenchmarkContainer_ConcurrentNestedAdd(b *testing.B) {
+	type BNCConfig struct{ ID int }
+
+	b.Run("TwoLevels", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			parent := &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 10; j++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(BNCConfig{ID: id}))
+					parent.Add(child)
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+
+	b.Run("ThreeLevels", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			root := &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 10; j++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					level1 := &Container{}
+					level1.MustAdd(Provide(BNCConfig{ID: id}))
+					level2 := &Container{}
+					level2.MustAdd(level1)
+					root.Add(level2)
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+}
+
+func BenchmarkContainer_ConcurrentCrossNested(b *testing.B) {
+	b.Run("ABC_Separate", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			a, b, c := &Container{}, &Container{}, &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 30; j++ {
+				wg.Add(3)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeA{ID: id}))
+					a.Add(child)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeB{ID: id}))
+					b.Add(child)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeC{ID: id}))
+					c.Add(child)
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+
+	b.Run("ABC_CrossAdd", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			a, b, c := &Container{}, &Container{}, &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 30; j++ {
+				wg.Add(3)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeA{ID: id}))
+					b.Add(child)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeB{ID: id}))
+					c.Add(child)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					child := &Container{}
+					child.MustAdd(Provide(CntTypeC{ID: id}))
+					a.Add(child)
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
+
+	b.Run("TwoLevel_Cross", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			a, b, c := &Container{}, &Container{}, &Container{}
+			var wg sync.WaitGroup
+			for j := 0; j < 30; j++ {
+				wg.Add(3)
+				go func(id int) {
+					defer wg.Done()
+					l1 := &Container{}
+					l1.MustAdd(Provide(CntTypeA{ID: id}))
+					l2 := &Container{}
+					l2.MustAdd(l1)
+					b.Add(l2)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					l1 := &Container{}
+					l1.MustAdd(Provide(CntTypeB{ID: id}))
+					l2 := &Container{}
+					l2.MustAdd(l1)
+					c.Add(l2)
+				}(j)
+				go func(id int) {
+					defer wg.Done()
+					l1 := &Container{}
+					l1.MustAdd(Provide(CntTypeC{ID: id}))
+					l2 := &Container{}
+					l2.MustAdd(l1)
+					a.Add(l2)
+				}(j)
+			}
+			wg.Wait()
+		}
+	})
 }

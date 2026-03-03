@@ -99,7 +99,7 @@ func Run() error {
 		return fmt.Errorf("failed to inject App: %w", err)
 	}
 
-	shutdown, err := godi.Inject[godi.Hooks](container)
+	shutdown, err := godi.Inject[godi.Callbacks](container)
 	if err != nil {
 		return fmt.Errorf("failed to inject shutdown: %w", err)
 	}

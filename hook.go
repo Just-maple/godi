@@ -5,10 +5,10 @@ import (
 	"sync"
 )
 
-type Hooks func(func([]func(ctx context.Context)))
+type Callbacks func(func([]func(ctx context.Context)))
 
-func (hooks Hooks) Iterate(ctx context.Context, reverse bool) {
-	hooks(func(fns []func(ctx context.Context)) {
+func (callbacks Callbacks) Iterate(ctx context.Context, reverse bool) {
+	callbacks(func(fns []func(ctx context.Context)) {
 		for i := 0; i < len(fns); i++ {
 			fn := fns[i]
 			if reverse {
@@ -19,7 +19,7 @@ func (hooks Hooks) Iterate(ctx context.Context, reverse bool) {
 	})
 }
 
-func (c *Container) Hook(name string, build func(v any, provided int) func(ctx context.Context)) Hooks {
+func (c *Container) Hook(name string, build func(v any, provided int) func(ctx context.Context)) Callbacks {
 	c.once.Do(func() { c.hooks = new(sync.Map) })
 	mu := sync.Mutex{}
 	called := make(map[any]int)
@@ -37,14 +37,14 @@ func (c *Container) Hook(name string, build func(v any, provided int) func(ctx c
 	})
 	return func(f func([]func(ctx context.Context))) {
 		mu.Lock()
-		hooks := make([]func(context.Context), len(fns))
-		copy(hooks, fns)
+		cbs := make([]func(context.Context), len(fns))
+		copy(cbs, fns)
 		mu.Unlock()
-		f(hooks)
+		f(cbs)
 	}
 }
 
-func (c *Container) HookOnce(name string, build func(v any) func(ctx context.Context)) Hooks {
+func (c *Container) HookOnce(name string, build func(v any) func(ctx context.Context)) Callbacks {
 	return c.Hook(name, func(v any, provided int) func(ctx context.Context) {
 		if provided > 0 {
 			return nil

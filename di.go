@@ -112,12 +112,11 @@ func (c *Container) inject(parent *Container, ptr any) (value any, err error) {
 	return
 }
 
-type depends struct {
-	Container
-	depth int
-}
-
 func (c *Container) from(p Provider, id, ptr any) (v any, err error) {
+	type depends struct {
+		Container
+		depth int
+	}
 	stat, _ := c.providers.Load(id)
 	if _, ok := stat.(*depends); ok {
 		deps, depth := make([]string, 0), make(map[string]int)

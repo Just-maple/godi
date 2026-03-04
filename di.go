@@ -182,22 +182,25 @@ func (c *Container) from(p Provider, id, ptr any, parent *Container) (v any, err
 	}
 
 	// Create temporary container context for this injection
-	cp := &Container{hooks: c.hooks}
-	copyMap := func(k, v interface{}) bool { cp.providers.Store(k, v); return true }
-
-	// Copy providers from current and parent containers
-	if c.providers.Range(copyMap); parent != nil {
-		parent.providers.Range(copyMap)
+	tmp := &Container{hooks: c.hooks}
+	doCopy := func(k, v interface{}) bool {
+		if k == id {
+			tmp.providers.Store(k, locked) // Mark current type as being injected
+		} else if k != locked {
+			tmp.providers.Store(k, v)
+		}
+		return true
 	}
 
-	// Mark current type as being injected
-	cp.providers.Store(id, locked)
-	cp.providers.Delete(locked)
+	// Copy providers from current and parent containers
+	if c.providers.Range(doCopy); parent != nil {
+		parent.providers.Range(doCopy)
+	}
 
 	// Execute the actual injection
-	if v, err = p.inject(cp, ptr); err == nil && cp.hooks != nil {
+	if v, err = p.inject(tmp, ptr); err == nil && tmp.hooks != nil {
 		// Trigger hooks after successful injection
-		cp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
+		tmp.hooks.Range(func(_, h any) bool { h.(func(any, any))(id, v); return true })
 	}
 	return
 }
